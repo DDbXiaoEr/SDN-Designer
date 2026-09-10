@@ -1,5 +1,7 @@
 # OVN Designer
 
+[English](./README.en.md) | 中文
+
 纯前端、拖拽式的虚拟网络设计器。通过拖拽节点与连线，可视化搭建虚拟网络拓扑，并一键导出 **OVN 命令行脚本** 或 **阿里云 Terraform** 资源定义。
 
 ![技术栈](https://img.shields.io/badge/Vue%203-4FC08D?logo=vuedotjs&logoColor=white)
