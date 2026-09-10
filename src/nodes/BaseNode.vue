@@ -18,11 +18,26 @@ const kindLabel = computed(() => t(nodeLabelKey(def.value, vendor.value)))
 const summary = computed(() =>
   def.value.summary ? def.value.summary(props.data).map(([k, v]) => [t(k), v]) : []
 )
+
+const handles = computed(() => def.value.handles || { source: 2, target: 2 })
+const targetIds = computed(() => Array.from({ length: handles.value.target }, (_, i) => `target-${i}`))
+const sourceIds = computed(() => Array.from({ length: handles.value.source }, (_, i) => `source-${i}`))
+function handleTop(i, total) {
+  return `${((i + 1) / (total + 1)) * 100}%`
+}
 </script>
 
 <template>
   <div class="node" :class="{ selected, ovn: def.category === 'ovn', cloud: def.category === 'cloud' }">
-    <Handle type="target" :position="Position.Left" class="handle" />
+    <Handle
+      v-for="(id, i) in targetIds"
+      :key="id"
+      type="target"
+      :id="id"
+      :position="Position.Left"
+      class="handle"
+      :style="{ top: handleTop(i, targetIds.length) }"
+    />
     <div class="node-header">
       <span class="badge">{{ nodeBadge(props.type, vendor) }}</span>
       <span class="node-name">{{ data.name }}</span>
@@ -36,7 +51,15 @@ const summary = computed(() =>
         </div>
       </div>
     </div>
-    <Handle type="source" :position="Position.Right" class="handle" />
+    <Handle
+      v-for="(id, i) in sourceIds"
+      :key="id"
+      type="source"
+      :id="id"
+      :position="Position.Right"
+      class="handle"
+      :style="{ top: handleTop(i, sourceIds.length) }"
+    />
   </div>
 </template>
 

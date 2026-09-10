@@ -34,6 +34,7 @@ export default {
     logicalSwitch: '逻辑交换机',
     logicalRouter: '逻辑路由器',
     host: '宿主机 Chassis',
+    cluster: '宿主机集群',
     vm: '虚拟机',
     vpc: {
       aliyun: '专有网络 VPC',
@@ -99,6 +100,7 @@ export default {
     type: '类型',
     zone: '可用区',
     spec: '规格',
+    hosts: '主机',
   },
   connections: {
     vmToSwitch: '挂载端口',
@@ -106,6 +108,7 @@ export default {
     routerToSwitch: '接入交换',
     hostToHost: '隧道互联',
     switchToHost: '部署到节点',
+    vpcToCluster: '部署到集群',
     vpcToSubnet: '包含子网',
     subnetToInstance: '部署实例',
     instanceToSg: '加入安全组',

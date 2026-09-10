@@ -10,6 +10,7 @@ const { t } = useI18n()
 const groups = computed(() => {
   const map = {}
   for (const [type, def] of Object.entries(NODE_TYPES)) {
+    if (def.hidden) continue
     if (!map[def.category]) map[def.category] = []
     map[def.category].push({ type, def })
   }

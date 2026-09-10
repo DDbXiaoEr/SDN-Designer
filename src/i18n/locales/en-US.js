@@ -34,6 +34,7 @@ export default {
     logicalSwitch: 'Logical Switch',
     logicalRouter: 'Logical Router',
     host: 'Host Chassis',
+    cluster: 'Host Cluster',
     vm: 'Virtual Machine',
     vpc: {
       aliyun: 'VPC',
@@ -99,6 +100,7 @@ export default {
     type: 'Type',
     zone: 'Zone',
     spec: 'Spec',
+    hosts: 'hosts',
   },
   connections: {
     vmToSwitch: 'attach port',
@@ -106,6 +108,7 @@ export default {
     routerToSwitch: 'connect to switch',
     hostToHost: 'tunnel interconnect',
     switchToHost: 'deploy to node',
+    vpcToCluster: 'deploy to cluster',
     vpcToSubnet: 'contains subnet',
     subnetToInstance: 'deploy instance',
     instanceToSg: 'join security group',

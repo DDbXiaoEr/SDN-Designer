@@ -23,7 +23,7 @@ import '@vue-flow/minimap/dist/style.css'
 import '@vue-flow/controls/dist/style.css'
 
 const designer = createDesigner()
-const { vf, selectedId, nodes, edges, addNode, removeEdge, clear } = designer
+const { vf, selectedId, nodes, edges, addNode, removeEdge, clear, recomputeClusters } = designer
 const { screenToFlowCoordinate } = vf
 const { t } = useI18n()
 
@@ -75,10 +75,15 @@ function onConnect(conn) {
       id: nextId('e'),
       source: conn.source,
       target: conn.target,
+      sourceHandle: conn.sourceHandle,
+      targetHandle: conn.targetHandle,
       label: t(rule.label),
       type: 'default',
     },
   ])
+  if (source.type === 'Host' && target.type === 'Host') {
+    recomputeClusters()
+  }
 }
 
 function onNodeClick({ node }) {
@@ -86,7 +91,11 @@ function onNodeClick({ node }) {
 }
 
 function onEdgeClick({ edge }) {
+  const src = nodes.value.find((n) => n.id === edge.source)
+  const tgt = nodes.value.find((n) => n.id === edge.target)
+  const isTunnel = src && tgt && src.type === 'Host' && tgt.type === 'Host'
   removeEdge(edge.id)
+  if (isTunnel) recomputeClusters()
 }
 
 function onPaneClick() {

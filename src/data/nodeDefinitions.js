@@ -39,6 +39,7 @@ export const NODE_TYPES = {
     category: 'ovn',
     label: 'nodes.host',
     badge: 'HOST',
+    handles: { source: 4, target: 4 },
     defaults: () => ({
       name: 'host1',
       encapType: 'geneve',
@@ -64,6 +65,18 @@ export const NODE_TYPES = {
         ['summary.nic', nic ? `${nic.name} ${nic.ip}` : '-'],
       ]
     },
+  },
+  Cluster: {
+    category: 'ovn',
+    label: 'nodes.cluster',
+    badge: 'CLUSTER',
+    hidden: true,
+    defaults: () => ({
+      name: 'cluster1',
+      hostCount: 0,
+    }),
+    fields: [],
+    summary: (d) => [['summary.hosts', String(d.hostCount ?? 0)]],
   },
   VM: {
     category: 'ovn',
@@ -193,6 +206,7 @@ export const CONNECTION_RULES = [
   { source: 'LogicalRouter', target: 'LogicalSwitch', label: 'connections.routerToSwitch' },
   { source: 'Host', target: 'Host', label: 'connections.hostToHost' },
   { source: 'LogicalSwitch', target: 'Host', label: 'connections.switchToHost' },
+  { source: 'VPC', target: 'Cluster', label: 'connections.vpcToCluster' },
   { source: 'VPC', target: 'Subnet', label: 'connections.vpcToSubnet' },
   { source: 'Subnet', target: 'Instance', label: 'connections.subnetToInstance' },
   { source: 'Instance', target: 'SecurityGroup', label: 'connections.instanceToSg' },
