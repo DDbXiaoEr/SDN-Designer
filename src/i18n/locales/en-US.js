@@ -113,7 +113,7 @@ export default {
       nameRequired: 'Please enter the node name',
       nicRequired: 'Please configure at least one NIC',
       nicNameRequired: 'NIC name cannot be empty',
-      nicIpRequired: 'IP address of NIC {name} cannot be empty',
+      tunnelNicIpRequired: 'Tunnel NIC {name} requires an IP address',
     },
   },
   export: {

@@ -113,7 +113,7 @@ export default {
       nameRequired: '请填写节点名称',
       nicRequired: '请至少配置一张网卡',
       nicNameRequired: '网卡名称不能为空',
-      nicIpRequired: '网卡 {name} 的 IP 地址不能为空',
+      tunnelNicIpRequired: '隧道网卡 {name} 的 IP 地址不能为空',
     },
   },
   export: {

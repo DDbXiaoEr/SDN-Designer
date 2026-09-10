@@ -37,8 +37,8 @@ function confirm() {
       error.value = t('createHost.errors.nicNameRequired')
       return
     }
-    if (!n.ip.trim()) {
-      error.value = t('createHost.errors.nicIpRequired', { name: n.name })
+    if (n.tunnel && !n.ip.trim()) {
+      error.value = t('createHost.errors.tunnelNicIpRequired', { name: n.name })
       return
     }
   }
