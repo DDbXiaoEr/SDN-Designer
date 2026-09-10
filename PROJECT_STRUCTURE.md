@@ -27,7 +27,8 @@ OVN-Designer/
     │   ├── designer.js        # 状态管理（provide/inject 封装 useVueFlow）
     │   └── vendor.js          # 当前云厂商（ref，持久化到 localStorage）
     ├── nodes/
-    │   ├── BaseNode.vue       # 通用节点外观组件（徽标/名称/摘要/连接点）
+    │   ├── BaseNode.vue       # 通用节点外观组件（徽标/名称/摘要/多连接点）
+    │   ├── ClusterNode.vue    # 集群分组节点外观（Host 自动归并后的大节点）
     │   └── index.js           # nodeTypes 映射（markRaw(BaseNode) 复用）
     ├── components/
     │   ├── Palette.vue        # 左侧节点库（可拖拽）
@@ -65,6 +66,7 @@ OVN-Designer/
 | LogicalSwitch   | ovn     | `name`, `subnet`                                   |
 | LogicalRouter   | ovn     | `name`, `externalNetwork`                          |
 | Host            | ovn     | `name`, `encapType`, `nics[{name,ip,tunnel}]`      |
+| Cluster         | ovn     | `name`, `hostCount`（自动生成，不进节点库）        |
 | VM              | ovn     | `name`, `ip`, `mac`                                |
 | VPC             | cloud   | `name`, `cidr`                                     |
 | Subnet          | cloud   | `name`, `cidr`, `zone`                             |
@@ -80,6 +82,11 @@ OVN-Designer/
 - 连接规则见 `CONNECTION_RULES`，`canConnect(sourceType, targetType)` 校验。
 - 「区域（zone）」= Host 节点通过 Host↔Host 隧道连线形成的连通分量，
   由 `computeZones(nodes, edges)` 计算；`LogicalSwitch → Host` 连线表示交换机部署到该区域。
+- 当多个 Host 通过隧道互联时，`designer.js` 的 `recomputeClusters()` 会自动把它们归并为
+  一个 `Cluster` 分组节点（Vue Flow parent/child），`VPC → Cluster` 连线表示 VPC 部署到该集群。
+  删除 Cluster 节点会解散分组（移除内部隧道连线并还原 Host 绝对位置）。
+- `NODE_TYPES` 中 `handles: { source, target }` 控制节点左右两侧的连接点数量（Host 默认 4/4，其余 2/2）；
+  `hidden: true` 的节点类型不会出现在左侧节点库。
 
 ### 云厂商（vendor）
 
