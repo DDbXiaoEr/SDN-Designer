@@ -1,0 +1,33 @@
+:root {
+  --bg: #0f1117;
+  --panel: #171a21;
+  --panel-2: #1e222b;
+  --border: #2a2f3a;
+  --text: #e6e8ee;
+  --text-dim: #8b93a7;
+  --accent: #4f8cff;
+  --ovn: #6ee7b7;
+  --cloud: #fbbf24;
+  --danger: #f87171;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#app {
+  margin: 0;
+  height: 100%;
+  width: 100%;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC',
+    'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
+  color: var(--text);
+  background: var(--bg);
+}
+
+button {
+  font-family: inherit;
+  cursor: pointer;
+}

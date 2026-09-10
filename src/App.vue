@@ -1,0 +1,199 @@
+<script setup>
+import { ref, computed } from 'vue'
+import { VueFlow } from '@vue-flow/core'
+import { useI18n } from 'vue-i18n'
+import { Background, BackgroundVariant } from '@vue-flow/background'
+import { Controls } from '@vue-flow/controls'
+import { MiniMap } from '@vue-flow/minimap'
+import { nodeTypes } from './nodes/index.js'
+import { canConnect } from './data/nodeDefinitions.js'
+import { createDesigner, nextId } from './store/designer.js'
+import { exportOvn } from './export/ovn.js'
+import { exportAliyunTerraform } from './export/terraformAliyun.js'
+import Palette from './components/Palette.vue'
+import Toolbar from './components/Toolbar.vue'
+import Inspector from './components/Inspector.vue'
+import ExportModal from './components/ExportModal.vue'
+import CreateHostDialog from './components/CreateHostDialog.vue'
+
+import '@vue-flow/core/dist/style.css'
+import '@vue-flow/core/dist/theme-default.css'
+import '@vue-flow/minimap/dist/style.css'
+import '@vue-flow/controls/dist/style.css'
+
+const designer = createDesigner()
+const { vf, selectedId, nodes, edges, addNode, removeEdge, clear } = designer
+const { screenToFlowCoordinate } = vf
+const { t } = useI18n()
+
+const exportModal = ref(null)
+const hostDialogOpen = ref(false)
+const pendingDropPosition = ref(null)
+
+function onDragOver(e) {
+  e.preventDefault()
+  e.dataTransfer.dropEffect = 'move'
+}
+
+function onDrop(e) {
+  const type = e.dataTransfer.getData('application/ovn-designer')
+  if (!type) return
+  const position = screenToFlowCoordinate({ x: e.clientX, y: e.clientY })
+  const pos = { x: position.x - 90, y: position.y - 24 }
+  if (type === 'Host') {
+    pendingDropPosition.value = pos
+    hostDialogOpen.value = true
+    return
+  }
+  addNode(type, pos)
+}
+
+function onHostConfirm(data) {
+  addNode('Host', pendingDropPosition.value, data)
+  hostDialogOpen.value = false
+  pendingDropPosition.value = null
+}
+
+function onHostCancel() {
+  hostDialogOpen.value = false
+  pendingDropPosition.value = null
+}
+
+function onConnect(conn) {
+  const source = nodes.value.find((n) => n.id === conn.source)
+  const target = nodes.value.find((n) => n.id === conn.target)
+  if (!source || !target) return
+  const rule = canConnect(source.type, target.type)
+  if (!rule) return
+  const exists = edges.value.some(
+    (e) => e.source === conn.source && e.target === conn.target
+  )
+  if (exists) return
+  vf.addEdges([
+    {
+      id: nextId('e'),
+      source: conn.source,
+      target: conn.target,
+      label: t(rule.label),
+      type: 'default',
+    },
+  ])
+}
+
+function onNodeClick({ node }) {
+  selectedId.value = node.id
+}
+
+function onEdgeClick({ edge }) {
+  removeEdge(edge.id)
+}
+
+function onPaneClick() {
+  selectedId.value = null
+}
+
+function showOvn() {
+  exportModal.value = {
+    title: t('export.ovnTitle'),
+    filename: 'ovn-setup.sh',
+    content: exportOvn(nodes.value, edges.value),
+  }
+}
+
+function showTerraform() {
+  exportModal.value = {
+    title: t('export.terraformTitle'),
+    filename: 'main.tf',
+    content: exportAliyunTerraform(nodes.value, edges.value),
+  }
+}
+
+const nodesCount = computed(() => nodes.value.length)
+</script>
+
+<template>
+  <div class="app">
+    <Toolbar
+      :nodes-count="nodesCount"
+      @export-ovn="showOvn"
+      @export-terraform="showTerraform"
+      @clear="clear"
+    />
+    <div class="main">
+      <Palette />
+      <div class="canvas">
+        <VueFlow
+          :node-types="nodeTypes"
+          :snap-to-grid="true"
+          :snap-grid="[16, 16]"
+          :default-edge-options="{
+            animated: false,
+            style: { stroke: '#4f8cff', strokeWidth: 2 },
+            labelStyle: { fill: '#e6e8ee', fontSize: 11, fontWeight: 600 },
+            labelBgStyle: { fill: '#1e222b' },
+            labelBgPadding: [6, 3],
+            labelBgBorderRadius: 4,
+          }"
+          @drop="onDrop"
+          @dragover="onDragOver"
+          @connect="onConnect"
+          @node-click="onNodeClick"
+          @edge-click="onEdgeClick"
+          @pane-click="onPaneClick"
+        >
+          <Background :variant="BackgroundVariant.Dots" :gap="20" :size="1" />
+          <Controls />
+          <MiniMap :pannable="true" :zoomable="true" />
+        </VueFlow>
+      </div>
+      <Inspector />
+    </div>
+
+    <ExportModal
+      v-if="exportModal"
+      :title="exportModal.title"
+      :filename="exportModal.filename"
+      :content="exportModal.content"
+      @close="exportModal = null"
+    />
+
+    <CreateHostDialog
+      v-if="hostDialogOpen"
+      @confirm="onHostConfirm"
+      @cancel="onHostCancel"
+    />
+  </div>
+</template>
+
+<style scoped>
+.app {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+.main {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+.canvas {
+  flex: 1;
+  min-width: 0;
+  position: relative;
+}
+:deep(.vue-flow__node) {
+  cursor: grab;
+}
+:deep(.vue-flow__node.selected) {
+  cursor: move;
+}
+:deep(.vue-flow__edge) {
+  cursor: pointer;
+}
+:deep(.vue-flow__edge-text) {
+  font-weight: 600;
+}
+:deep(.vue-flow__minimap) {
+  background: var(--panel);
+}
+</style>
