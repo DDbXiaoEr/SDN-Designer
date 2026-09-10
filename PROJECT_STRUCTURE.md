@@ -21,22 +21,30 @@ OVN-Designer/
     ├── styles/
     │   └── main.css           # 全局 CSS 变量（主题色）与基础样式
     ├── data/
-    │   └── nodeDefinitions.js # 节点类型元数据（唯一数据源）
+    │   ├── nodeDefinitions.js # 节点类型元数据（唯一数据源）
+    │   └── vendors.js         # 云厂商列表 + 资源名/徽标按厂商解析
     ├── store/
-    │   └── designer.js        # 状态管理（provide/inject 封装 useVueFlow）
+    │   ├── designer.js        # 状态管理（provide/inject 封装 useVueFlow）
+    │   └── vendor.js          # 当前云厂商（ref，持久化到 localStorage）
     ├── nodes/
     │   ├── BaseNode.vue       # 通用节点外观组件（徽标/名称/摘要/连接点）
     │   └── index.js           # nodeTypes 映射（markRaw(BaseNode) 复用）
     ├── components/
     │   ├── Palette.vue        # 左侧节点库（可拖拽）
-    │   ├── Toolbar.vue        # 顶部工具栏（语言切换/清空/导出）
+    │   ├── Toolbar.vue        # 顶部工具栏（厂商/语言切换/清空/导出）
     │   ├── Inspector.vue      # 右侧属性面板（编辑选中节点）
     │   ├── CreateHostDialog.vue # 创建宿主机对话框（填写网卡信息）
-    │   └── ExportModal.vue    # 导出结果弹窗（复制/下载/关闭）
+    │   └── ExportModal.vue    # 导出结果弹窗（按节点分组选择/复制/下载/关闭）
     ├── export/
     │   ├── utils.js           # 通用工具：CIDR/MAC/图关系/computeZones/download
-    │   ├── ovn.js             # exportOvn(nodes, edges) -> ovn-nbctl/ovs-vsctl 脚本
-    │   └── terraformAliyun.js # exportAliyunTerraform(nodes, edges) -> 阿里云 main.tf
+    │   ├── ovn.js             # exportOvn(nodes, edges) -> {targets, all}（按执行节点拆分）
+    │   └── terraform/
+    │       ├── common.js      # 云资源导出共享上下文（命名/引用/VPC解析/下一跳）
+    │       ├── index.js       # exportTerraform(nodes, edges, vendor) 按厂商分发
+    │       ├── aliyun.js      # 阿里云 Terraform 导出
+    │       ├── aws.js         # AWS Terraform 导出
+    │       ├── tencent.js     # 腾讯云 Terraform 导出
+    │       └── huawei.js      # 华为云 Terraform 导出
     └── i18n/
         ├── index.js           # createI18n、setLocale、translate、SUPPORTED_LOCALES
         └── locales/
@@ -73,6 +81,21 @@ OVN-Designer/
 - 「区域（zone）」= Host 节点通过 Host↔Host 隧道连线形成的连通分量，
   由 `computeZones(nodes, edges)` 计算；`LogicalSwitch → Host` 连线表示交换机部署到该区域。
 
+### 云厂商（vendor）
+
+- 工具栏选择云厂商：`aliyun` / `tencent` / `aws` / `huawei`，存于 `store/vendor.js`，持久化到 localStorage。
+- 云资源节点的展示名与徽标按厂商变化（`vendors.js` 的 `nodeLabelKey` / `nodeBadge`）：
+  i18n 中 `nodes.vpc` / `nodes.subnet` / `nodes.instance` 等为按厂商分组的对象。
+- Terraform 导出按厂商分发（`export/terraform/index.js`）；OVN 导出与厂商无关。
+
+### OVN 导出（按执行节点拆分）
+
+- `exportOvn(nodes, edges)` 返回 `{ targets, all }`：
+  - `targets` = 按执行位置拆分的命令：`central`（控制节点，ovn-nbctl/ovn-sbctl）+
+    每个 `Host`（各自的 ovs-vsctl 封装命令），各带独立 `content` 与 `filename`。
+  - `all` = 完整合并脚本 `{ content, filename }`。
+- `ExportModal` 接收 `groups`（分组列表），多组时显示下拉选择查看/下载对应节点的命令。
+
 ## 关键约定
 
 1. **节点类型新增**：只需在 `nodeDefinitions.js` 加一条 `NODE_TYPES` 记录 + 必要的
@@ -81,5 +104,5 @@ OVN-Designer/
    子组件通过 `useDesigner()` inject；节点/边数据以 `nodes.value` / `edges.value` 读取，
    **不要**用 `v-model:nodes`，避免双向绑定导致节点在点击后丢失。
 3. **所有 UI 文案必须走 i18n**（`t('key')`），新文案同时在两个 locale 文件补齐。
-4. **导出逻辑**：`export/ovn.js` 与 `export/terraformAliyun.js` 为纯函数，
-   内部用 `translate('export.xxx')` 生成多语言注释。
+4. **导出逻辑**：`export/` 下均为纯函数，内部用 `translate('export.xxx')` 生成多语言注释；
+   新增云厂商时在 `export/terraform/` 加对应导出器并在 `index.js` 分发。

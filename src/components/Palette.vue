@@ -2,6 +2,8 @@
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { NODE_TYPES, CATEGORIES } from '../data/nodeDefinitions.js'
+import { nodeLabelKey, nodeBadge } from '../data/vendors.js'
+import { vendor } from '../store/vendor.js'
 
 const { t } = useI18n()
 
@@ -38,8 +40,8 @@ function onDragStart(e, type) {
         draggable="true"
         @dragstart="onDragStart($event, item.type)"
       >
-        <span class="badge">{{ item.def.badge }}</span>
-        <span class="item-label">{{ t(item.def.label) }}</span>
+        <span class="badge">{{ nodeBadge(item.type, vendor) }}</span>
+        <span class="item-label">{{ t(nodeLabelKey(item.def, vendor)) }}</span>
       </div>
     </div>
   </aside>

@@ -3,6 +3,8 @@ import { computed } from 'vue'
 import { Handle, Position } from '@vue-flow/core'
 import { useI18n } from 'vue-i18n'
 import { NODE_TYPES } from '../data/nodeDefinitions.js'
+import { nodeLabelKey, nodeBadge } from '../data/vendors.js'
+import { vendor } from '../store/vendor.js'
 
 const props = defineProps({
   type: { type: String, required: true },
@@ -12,7 +14,7 @@ const props = defineProps({
 
 const { t } = useI18n()
 const def = computed(() => NODE_TYPES[props.type])
-const kindLabel = computed(() => t(def.value.label))
+const kindLabel = computed(() => t(nodeLabelKey(def.value, vendor.value)))
 const summary = computed(() =>
   def.value.summary ? def.value.summary(props.data).map(([k, v]) => [t(k), v]) : []
 )
@@ -22,7 +24,7 @@ const summary = computed(() =>
   <div class="node" :class="{ selected, ovn: def.category === 'ovn', cloud: def.category === 'cloud' }">
     <Handle type="target" :position="Position.Left" class="handle" />
     <div class="node-header">
-      <span class="badge">{{ def.badge }}</span>
+      <span class="badge">{{ nodeBadge(props.type, vendor) }}</span>
       <span class="node-name">{{ data.name }}</span>
     </div>
     <div class="node-body">

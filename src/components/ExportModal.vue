@@ -1,21 +1,24 @@
 <script setup>
-import { ref } from 'vue'
+import { ref, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { download } from '../export/utils.js'
 
 const props = defineProps({
   title: { type: String, required: true },
-  content: { type: String, required: true },
-  filename: { type: String, required: true },
+  groups: { type: Array, required: true },
 })
 
 const emit = defineEmits(['close'])
 const { t } = useI18n()
 const copied = ref(false)
+const selectedId = ref(props.groups.length ? props.groups[0].id : null)
+
+const selected = computed(() => props.groups.find((g) => g.id === selectedId.value) || props.groups[0])
+const hasSelector = computed(() => props.groups.length > 1)
 
 async function copy() {
   try {
-    await navigator.clipboard.writeText(props.content)
+    await navigator.clipboard.writeText(selected.value.content)
     copied.value = true
     setTimeout(() => (copied.value = false), 1500)
   } catch {
@@ -30,12 +33,15 @@ async function copy() {
       <div class="modal-header">
         <span class="modal-title">{{ title }}</span>
         <div class="modal-actions">
+          <select v-if="hasSelector" v-model="selectedId" class="group-select">
+            <option v-for="g in groups" :key="g.id" :value="g.id">{{ g.label }}</option>
+          </select>
           <button @click="copy">{{ copied ? t('common.copied') : t('common.copy') }}</button>
-          <button @click="download(filename, content)">{{ t('common.download') }}</button>
+          <button @click="download(selected.filename, selected.content)">{{ t('common.download') }}</button>
           <button class="close" @click="emit('close')">{{ t('common.close') }}</button>
         </div>
       </div>
-      <pre class="content">{{ content }}</pre>
+      <pre class="content">{{ selected.content }}</pre>
     </div>
   </div>
 </template>
@@ -64,6 +70,7 @@ async function copy() {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 12px;
   padding: 14px 16px;
   border-bottom: 1px solid var(--border);
 }
@@ -72,6 +79,7 @@ async function copy() {
 }
 .modal-actions {
   display: flex;
+  align-items: center;
   gap: 8px;
 }
 .modal-actions button {
@@ -84,6 +92,14 @@ async function copy() {
 }
 .modal-actions button.close {
   color: var(--text-dim);
+}
+.group-select {
+  border: 1px solid var(--border);
+  background: var(--panel-2);
+  color: var(--text);
+  border-radius: 6px;
+  padding: 6px 8px;
+  font-size: 12px;
 }
 .content {
   flex: 1;

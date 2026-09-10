@@ -2,6 +2,8 @@
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { NODE_TYPES } from '../data/nodeDefinitions.js'
+import { nodeLabelKey } from '../data/vendors.js'
+import { vendor } from '../store/vendor.js'
 import { useDesigner } from '../store/designer.js'
 
 const { t } = useI18n()
@@ -76,7 +78,7 @@ function nicPatch(i, key, value) {
     <template v-if="node && def">
       <div class="inspector-header">
         <div>
-          <div class="inspector-title">{{ t(def.label) }}</div>
+          <div class="inspector-title">{{ t(nodeLabelKey(def, vendor)) }}</div>
           <div class="inspector-id">{{ node.id }}</div>
         </div>
         <button class="danger" @click="removeNode(node.id)">{{ t('common.delete') }}</button>

@@ -9,7 +9,8 @@ import { nodeTypes } from './nodes/index.js'
 import { canConnect } from './data/nodeDefinitions.js'
 import { createDesigner, nextId } from './store/designer.js'
 import { exportOvn } from './export/ovn.js'
-import { exportAliyunTerraform } from './export/terraformAliyun.js'
+import { exportTerraform } from './export/terraform/index.js'
+import { vendor } from './store/vendor.js'
 import Palette from './components/Palette.vue'
 import Toolbar from './components/Toolbar.vue'
 import Inspector from './components/Inspector.vue'
@@ -93,18 +94,25 @@ function onPaneClick() {
 }
 
 function showOvn() {
-  exportModal.value = {
-    title: t('export.ovnTitle'),
-    filename: 'ovn-setup.sh',
-    content: exportOvn(nodes.value, edges.value),
-  }
+  const result = exportOvn(nodes.value, edges.value)
+  const groups = [
+    { id: 'all', label: t('export.allNodes'), content: result.all.content, filename: result.all.filename },
+    ...result.targets.map((tg) => ({
+      id: tg.id,
+      label: tg.kind === 'central' ? t('export.centralNode') : t('export.hostNode', { name: tg.name }),
+      content: tg.content,
+      filename: tg.filename,
+    })),
+  ]
+  exportModal.value = { title: t('export.ovnTitle'), groups }
 }
 
 function showTerraform() {
   exportModal.value = {
-    title: t('export.terraformTitle'),
-    filename: 'main.tf',
-    content: exportAliyunTerraform(nodes.value, edges.value),
+    title: t('export.terraformTitle', { vendor: t(`vendors.${vendor.value}`) }),
+    groups: [
+      { id: 'main', label: '', content: exportTerraform(nodes.value, edges.value, vendor.value), filename: 'main.tf' },
+    ],
   }
 }
 
@@ -152,8 +160,7 @@ const nodesCount = computed(() => nodes.value.length)
     <ExportModal
       v-if="exportModal"
       :title="exportModal.title"
-      :filename="exportModal.filename"
-      :content="exportModal.content"
+      :groups="exportModal.groups"
       @close="exportModal = null"
     />
 

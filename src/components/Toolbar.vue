@@ -1,6 +1,8 @@
 <script setup>
 import { useI18n } from 'vue-i18n'
 import { setLocale, SUPPORTED_LOCALES } from '../i18n/index.js'
+import { VENDORS } from '../data/vendors.js'
+import { vendor, setVendor } from '../store/vendor.js'
 
 defineProps({
   nodesCount: { type: Number, default: 0 },
@@ -15,6 +17,10 @@ function switchLocale() {
   const next = SUPPORTED_LOCALES[(idx + 1) % SUPPORTED_LOCALES.length]
   setLocale(next)
 }
+
+function onVendorChange(e) {
+  setVendor(e.target.value)
+}
 </script>
 
 <template>
@@ -25,6 +31,9 @@ function switchLocale() {
     </div>
     <div class="meta">{{ t('toolbar.nodeCount', { count: nodesCount }) }}</div>
     <div class="actions">
+      <select class="vendor-select" :value="vendor" @change="onVendorChange">
+        <option v-for="v in VENDORS" :key="v.value" :value="v.value">{{ t(v.label) }}</option>
+      </select>
       <button class="ghost" @click="switchLocale">{{ t('toolbar.language') }}: {{ locale }}</button>
       <button class="ghost" @click="emit('clear')">{{ t('toolbar.clear') }}</button>
       <button class="ovn" @click="emit('export-ovn')">{{ t('toolbar.exportOvn') }}</button>
@@ -91,5 +100,14 @@ button.cloud {
 }
 button.ghost {
   color: var(--text-dim);
+}
+.vendor-select {
+  border: 1px solid var(--border);
+  background: var(--panel-2);
+  color: var(--text);
+  border-radius: 7px;
+  padding: 7px 10px;
+  font-size: 13px;
+  font-weight: 600;
 }
 </style>
