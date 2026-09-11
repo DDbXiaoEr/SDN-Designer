@@ -9,8 +9,9 @@ function tunnelNicOf(host) {
 
 // 生成 ovn-nbctl / ovs-vsctl 命令行脚本
 // 返回 { targets, all }：
-//   targets - 按执行节点拆分的命令（central 控制节点 + 每个宿主机）
+//   targets - 按执行节点拆分的命令（central 控制节点 + 每个计算宿主机）
 //   all     - 完整脚本 { content, filename }
+// 控制节点只运行 ovn-nbctl / ovn-sbctl，不注册为 chassis，不参与隧道
 export function exportOvn(nodes, edges) {
   const { byId, targetNodes } = buildGraph(nodes, edges)
   const switches = nodes.filter((n) => n.type === 'LogicalSwitch')
@@ -18,6 +19,7 @@ export function exportOvn(nodes, edges) {
   const vms = nodes.filter((n) => n.type === 'VM')
   const hosts = nodes.filter((n) => n.type === 'Host')
   const controllerHost = hosts.find((h) => h.data.controller) || null
+  const computeHosts = hosts.filter((h) => h !== controllerHost)
   const centralHost = controllerHost || hosts[0] || null
   const centralIp = centralHost ? (tunnelNicOf(centralHost)?.ip || '') : ''
 
@@ -31,6 +33,7 @@ export function exportOvn(nodes, edges) {
 
   if (controllerHost) {
     c(`# ${tt('centralOnHost', { name: controllerHost.data.name })}`)
+    c(`# ${tt('centralNotChassis')}`)
     c()
   }
 
@@ -98,9 +101,9 @@ export function exportOvn(nodes, edges) {
     c()
   }
 
-  if (hosts.length) {
+  if (computeHosts.length) {
     c(`# ---- ${tt('chassis')} ----`)
-    for (const host of hosts) {
+    for (const host of computeHosts) {
       const nic = tunnelNicOf(host)
       if (!nic) {
         c(`# ${tt('hostNoNic', { name: host.data.name })}`)
@@ -111,9 +114,9 @@ export function exportOvn(nodes, edges) {
     c()
   }
 
-  // ---- 每个物理宿主机命令（ovs-vsctl）----
+  // ---- 每个计算宿主机命令（ovs-vsctl）----
   const hostBodies = new Map()
-  for (const host of hosts) {
+  for (const host of computeHosts) {
     const lines = []
     const h = (s = '') => lines.push(s)
     const nic = tunnelNicOf(host)
@@ -141,16 +144,17 @@ export function exportOvn(nodes, edges) {
   const hdr = ['#!/bin/bash', `# ${tt('generated')}`, 'set -e', '']
   all.push(...hdr)
   all.push(...central)
-  if (hosts.length) {
+  if (computeHosts.length) {
     all.push(`# ---- ${tt('tunnelNetwork')} ----`)
-    for (const host of hosts) {
+    for (const host of computeHosts) {
       all.push(hostBodies.get(host.id))
       all.push('')
     }
     const tunnels = edges.filter((e) => {
       const s = byId.get(e.source)
       const t = byId.get(e.target)
-      return s && t && s.type === 'Host' && t.type === 'Host'
+      return s && t && s.type === 'Host' && t.type === 'Host' &&
+        s !== controllerHost && t !== controllerHost
     })
     if (tunnels.length) {
       all.push(`# ${tt('tunnelTopology')}`)
@@ -166,27 +170,21 @@ export function exportOvn(nodes, edges) {
 
   const wrap = (body) => hdr.join('\n') + '\n' + body + '\n'
 
-  const centralContent = controllerHost
-    ? [central.join('\n'), hostBodies.get(controllerHost.id)].filter(Boolean).join('\n\n')
-    : central.join('\n')
-
   const targets = [
     {
       id: 'central',
       kind: 'central',
       name: controllerHost ? controllerHost.data.name : null,
-      content: wrap(centralContent),
+      content: wrap(central.join('\n')),
       filename: controllerHost ? `ovn-central-${slug(controllerHost.data.name)}.sh` : 'ovn-central.sh',
     },
-    ...hosts
-      .filter((h) => !controllerHost || h.id !== controllerHost.id)
-      .map((h) => ({
-        id: `host:${h.id}`,
-        kind: 'host',
-        name: h.data.name,
-        content: wrap(hostBodies.get(h.id)),
-        filename: `ovn-host-${slug(h.data.name)}.sh`,
-      })),
+    ...computeHosts.map((h) => ({
+      id: `host:${h.id}`,
+      kind: 'host',
+      name: h.data.name,
+      content: wrap(hostBodies.get(h.id)),
+      filename: `ovn-host-${slug(h.data.name)}.sh`,
+    })),
   ]
 
   return { targets, all: { content: all.join('\n'), filename: 'ovn-setup.sh' } }

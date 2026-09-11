@@ -167,6 +167,7 @@ export default {
     centralNode: 'OVN 控制节点',
     centralNodeOn: 'OVN 控制节点（{name}）',
     centralOnHost: 'OVN 控制节点运行在宿主机 {name} 上',
+    centralNotChassis: '控制节点不注册为 chassis，不参与隧道',
     hostNode: '宿主机 {name}',
     generated: '由 OVN Designer 生成',
     logicalSwitches: '逻辑交换机',
