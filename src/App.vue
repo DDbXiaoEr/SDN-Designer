@@ -10,6 +10,8 @@ import { canConnect } from './data/nodeDefinitions.js'
 import { createDesigner, nextId } from './store/designer.js'
 import { exportOvn } from './export/ovn.js'
 import { exportTerraform } from './export/terraform/index.js'
+import { download } from './export/utils.js'
+import { serializeDesign, deserializeDesign } from './store/persistence.js'
 import { vendor } from './store/vendor.js'
 import Palette from './components/Palette.vue'
 import Toolbar from './components/Toolbar.vue'
@@ -30,6 +32,7 @@ const { t } = useI18n()
 const exportModal = ref(null)
 const hostDialogOpen = ref(false)
 const pendingDropPosition = ref(null)
+const fileInput = ref(null)
 
 function onDragOver(e) {
   e.preventDefault()
@@ -102,13 +105,39 @@ function onPaneClick() {
   selectedId.value = null
 }
 
+function saveDesign() {
+  download('ovn-design.json', serializeDesign(nodes.value, edges.value))
+}
+
+function triggerImport() {
+  fileInput.value && fileInput.value.click()
+}
+
+function importDesign(e) {
+  const file = e.target.files && e.target.files[0]
+  if (!file) return
+  const reader = new FileReader()
+  reader.onload = () => {
+    try {
+      const { nodes: loadedNodes, edges: loadedEdges } = deserializeDesign(reader.result)
+      vf.setNodes(loadedNodes)
+      vf.setEdges(loadedEdges)
+      selectedId.value = null
+    } catch {
+      window.alert(t('toolbar.importError'))
+    }
+  }
+  reader.readAsText(file)
+  e.target.value = ''
+}
+
 function showOvn() {
   const result = exportOvn(nodes.value, edges.value)
   const groups = [
     { id: 'all', label: t('export.allNodes'), content: result.all.content, filename: result.all.filename },
     ...result.targets.map((tg) => ({
       id: tg.id,
-      label: tg.kind === 'central' ? t('export.centralNode') : t('export.hostNode', { name: tg.name }),
+      label: tg.kind === 'central' ? (tg.name ? t('export.centralNodeOn', { name: tg.name }) : t('export.centralNode')) : t('export.hostNode', { name: tg.name }),
       content: tg.content,
       filename: tg.filename,
     })),
@@ -135,6 +164,8 @@ const nodesCount = computed(() => nodes.value.length)
       @export-ovn="showOvn"
       @export-terraform="showTerraform"
       @clear="clear"
+      @save-design="saveDesign"
+      @import-design="triggerImport"
     />
     <div class="main">
       <Palette />
@@ -177,6 +208,14 @@ const nodesCount = computed(() => nodes.value.length)
       v-if="hostDialogOpen"
       @confirm="onHostConfirm"
       @cancel="onHostCancel"
+    />
+
+    <input
+      ref="fileInput"
+      type="file"
+      accept=".json,application/json"
+      style="display: none"
+      @change="importDesign"
     />
   </div>
 </template>

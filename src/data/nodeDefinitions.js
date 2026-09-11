@@ -43,6 +43,7 @@ export const NODE_TYPES = {
     defaults: () => ({
       name: 'host1',
       encapType: 'geneve',
+      controller: false,
       nics: [{ name: 'eth0', ip: '192.168.1.10', tunnel: true }],
     }),
     fields: [
@@ -57,6 +58,7 @@ export const NODE_TYPES = {
           { value: 'stt', label: 'STT' },
         ],
       },
+      { key: 'controller', label: 'fields.controller', type: 'checkbox' },
     ],
     summary: (d) => {
       const nic = (d.nics || []).find((n) => n.tunnel) || (d.nics || [])[0]

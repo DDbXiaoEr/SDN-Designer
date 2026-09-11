@@ -41,6 +41,7 @@ function handleTop(i, total) {
     <div class="node-header">
       <span class="badge">{{ nodeBadge(props.type, vendor) }}</span>
       <span class="node-name">{{ data.name }}</span>
+      <span v-if="data.controller" class="ctrl">{{ t('nodes.controllerBadge') }}</span>
     </div>
     <div class="node-body">
       <div class="node-kind">{{ kindLabel }}</div>
@@ -102,6 +103,16 @@ function handleTop(i, total) {
 .node-name {
   font-weight: 600;
   font-size: 13px;
+}
+.ctrl {
+  margin-left: auto;
+  background: var(--accent);
+  color: #0f1117;
+  font-weight: 700;
+  font-size: 10px;
+  border-radius: 4px;
+  padding: 1px 5px;
+  letter-spacing: 0.5px;
 }
 .node-body {
   padding: 8px 10px;

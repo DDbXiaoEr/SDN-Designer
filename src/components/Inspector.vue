@@ -21,6 +21,16 @@ function patch(key, value) {
   if (node.value) updateNodeData(node.value.id, { [key]: value })
 }
 
+function patchController(value) {
+  patch('controller', value)
+  if (!value) return
+  for (const n of nodes.value) {
+    if (n.type === 'Host' && n.id !== node.value.id && n.data.controller) {
+      updateNodeData(n.id, { controller: false })
+    }
+  }
+}
+
 // 安全组规则
 function addRule() {
   const rules = [...(node.value.data.rules || [])]
@@ -93,7 +103,7 @@ function nicPatch(i, key, value) {
           v-else-if="f.type === 'checkbox'"
           type="checkbox"
           :checked="node.data[f.key]"
-          @change="patch(f.key, $event.target.checked)"
+          @change="f.key === 'controller' ? patchController($event.target.checked) : patch(f.key, $event.target.checked)"
         />
         <input v-else :value="node.data[f.key]" @input="patch(f.key, $event.target.value)" />
       </div>

@@ -17,6 +17,9 @@ export function exportOvn(nodes, edges) {
   const routers = nodes.filter((n) => n.type === 'LogicalRouter')
   const vms = nodes.filter((n) => n.type === 'VM')
   const hosts = nodes.filter((n) => n.type === 'Host')
+  const controllerHost = hosts.find((h) => h.data.controller) || null
+  const centralHost = controllerHost || hosts[0] || null
+  const centralIp = centralHost ? (tunnelNicOf(centralHost)?.ip || '') : ''
 
   const zones = computeZones(nodes, edges)
   const zoneByHost = new Map()
@@ -25,6 +28,11 @@ export function exportOvn(nodes, edges) {
   // ---- 控制节点命令（ovn-nbctl / ovn-sbctl）----
   const central = []
   const c = (s = '') => central.push(s)
+
+  if (controllerHost) {
+    c(`# ${tt('centralOnHost', { name: controllerHost.data.name })}`)
+    c()
+  }
 
   if (switches.length) {
     c(`# ---- ${tt('logicalSwitches')} ----`)
@@ -98,7 +106,7 @@ export function exportOvn(nodes, edges) {
         c(`# ${tt('hostNoNic', { name: host.data.name })}`)
         continue
       }
-      c(`ovn-sbctl chassis-add ${slug(host.data.name)} ${host.data.encapType} ${nic.ip}`)
+      c(`ovn-sbctl chassis-add ${host.data.name} ${host.data.encapType} ${nic.ip}`)
     }
     c()
   }
@@ -113,7 +121,17 @@ export function exportOvn(nodes, edges) {
       h(`# ${tt('hostNoNic', { name: host.data.name })}`)
     } else {
       h(`# ${tt('hostTunnelNic', { name: host.data.name, nic: nic.name, ip: nic.ip })}`)
-      h(`ovs-vsctl set open_vswitch . external_ids:ovn-encap-ip="${nic.ip}" external_ids:ovn-encap-type=${host.data.encapType}`)
+      if (!centralIp) {
+        h(`# ${tt('ovnRemoteTodo')}`)
+      }
+      const ids = [
+        centralIp ? `external_ids:ovn-remote="tcp:${centralIp}:6642"` : null,
+        `external_ids:system-id="${host.data.name}"`,
+        `external_ids:ovn-encap-ip="${nic.ip}"`,
+        `external_ids:ovn-encap-type=${host.data.encapType}`,
+      ].filter(Boolean)
+      h('ovs-vsctl set open_vswitch . \\')
+      ids.forEach((id, i) => h(`  ${id}${i < ids.length - 1 ? ' \\' : ''}`))
     }
     hostBodies.set(host.id, lines.join('\n'))
   }
@@ -148,15 +166,27 @@ export function exportOvn(nodes, edges) {
 
   const wrap = (body) => hdr.join('\n') + '\n' + body + '\n'
 
+  const centralContent = controllerHost
+    ? [central.join('\n'), hostBodies.get(controllerHost.id)].filter(Boolean).join('\n\n')
+    : central.join('\n')
+
   const targets = [
-    { id: 'central', kind: 'central', name: null, content: wrap(central.join('\n')), filename: 'ovn-central.sh' },
-    ...hosts.map((h) => ({
-      id: `host:${h.id}`,
-      kind: 'host',
-      name: h.data.name,
-      content: wrap(hostBodies.get(h.id)),
-      filename: `ovn-host-${slug(h.data.name)}.sh`,
-    })),
+    {
+      id: 'central',
+      kind: 'central',
+      name: controllerHost ? controllerHost.data.name : null,
+      content: wrap(centralContent),
+      filename: controllerHost ? `ovn-central-${slug(controllerHost.data.name)}.sh` : 'ovn-central.sh',
+    },
+    ...hosts
+      .filter((h) => !controllerHost || h.id !== controllerHost.id)
+      .map((h) => ({
+        id: `host:${h.id}`,
+        kind: 'host',
+        name: h.data.name,
+        content: wrap(hostBodies.get(h.id)),
+        filename: `ovn-host-${slug(h.data.name)}.sh`,
+      })),
   ]
 
   return { targets, all: { content: all.join('\n'), filename: 'ovn-setup.sh' } }

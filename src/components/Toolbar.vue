@@ -8,7 +8,7 @@ defineProps({
   nodesCount: { type: Number, default: 0 },
 })
 
-const emit = defineEmits(['export-ovn', 'export-terraform', 'clear'])
+const emit = defineEmits(['export-ovn', 'export-terraform', 'clear', 'save-design', 'import-design'])
 
 const { t, locale } = useI18n()
 
@@ -36,6 +36,8 @@ function onVendorChange(e) {
       </select>
       <button class="ghost" @click="switchLocale">{{ t('toolbar.language') }}: {{ locale }}</button>
       <button class="ghost" @click="emit('clear')">{{ t('toolbar.clear') }}</button>
+      <button class="ghost" @click="emit('save-design')">{{ t('toolbar.saveDesign') }}</button>
+      <button class="ghost" @click="emit('import-design')">{{ t('toolbar.importDesign') }}</button>
       <button class="ovn" @click="emit('export-ovn')">{{ t('toolbar.exportOvn') }}</button>
       <button class="cloud" @click="emit('export-terraform')">{{ t('toolbar.exportTerraform') }}</button>
     </div>

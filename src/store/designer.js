@@ -1,7 +1,8 @@
-import { ref, provide, inject } from 'vue'
+import { ref, provide, inject, watch } from 'vue'
 import { useVueFlow } from '@vue-flow/core'
 import { NODE_TYPES } from '../data/nodeDefinitions.js'
 import { computeZones } from '../export/utils.js'
+import { saveToStorage, loadFromStorage } from './persistence.js'
 
 const KEY = Symbol('ovn-designer')
 
@@ -43,6 +44,22 @@ function computeBBox(hostNodes, abs) {
 export function createDesigner() {
   const vf = useVueFlow()
   const selectedId = ref(null)
+
+  const saved = loadFromStorage()
+  if (saved) {
+    vf.setNodes(saved.nodes)
+    vf.setEdges(saved.edges)
+  }
+
+  let saveTimer = null
+  watch(
+    [vf.nodes, vf.edges],
+    ([n, e]) => {
+      if (saveTimer) clearTimeout(saveTimer)
+      saveTimer = setTimeout(() => saveToStorage(n, e), 300)
+    },
+    { deep: true }
+  )
 
   function addNode(type, position, dataOverrides) {
     const def = NODE_TYPES[type]
