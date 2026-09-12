@@ -1,4 +1,4 @@
-import { createCloudContext, resolveNextHopNode } from './common.js'
+import { createCloudContext, resolveNextHopNode, resolveVpcRegion } from './common.js'
 import { translate } from '../../i18n/index.js'
 
 const tt = (key) => translate(`export.${key}`)
@@ -15,7 +15,7 @@ const resourceTypes = {
   routeEntry: 'tencentcloud_route_entry',
 }
 
-const header = `terraform {
+const header = (region) => `terraform {
   required_providers {
     tencentcloud = {
       source  = "tencentcloudstack/tencentcloud"
@@ -30,7 +30,7 @@ provider "tencentcloud" {
 
 variable "region" {
   type    = string
-  default = "ap-guangzhou"
+  default = "${region}"
 }
 `
 
@@ -43,7 +43,7 @@ function tcProtocol(protocol) {
 export function exportTencentTerraform(nodes, edges) {
   const ctx = createCloudContext(nodes, edges, resourceTypes)
   const { ref, findVpc, findSubnet } = ctx
-  const blocks = [header]
+  const blocks = [header(resolveVpcRegion(nodes, 'ap-guangzhou'))]
 
   for (const vpc of nodes.filter((n) => n.type === 'VPC')) {
     blocks.push(`resource "tencentcloud_vpc" "${ctx.name(vpc)}" {

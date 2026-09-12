@@ -22,7 +22,8 @@ OVN-Designer/
     │   └── main.css           # 全局 CSS 变量（主题色）与基础样式
     ├── data/
     │   ├── nodeDefinitions.js # 节点类型元数据（唯一数据源）
-    │   └── vendors.js         # 云厂商列表 + 资源名/徽标按厂商解析
+    │   ├── vendors.js         # 云厂商列表 + 资源名/徽标按厂商解析
+    │   └── regions.js         # 各云厂商地域列表与默认地域
     ├── store/
     │   ├── designer.js        # 状态管理（provide/inject 封装 useVueFlow）
     │   └── vendor.js          # 当前云厂商（ref，持久化到 localStorage）
@@ -68,7 +69,7 @@ OVN-Designer/
 | Host            | ovn     | `name`, `encapType`, `nics[{name,ip,tunnel}]`      |
 | Cluster         | ovn     | `name`, `hostCount`（自动生成，不进节点库）        |
 | VM              | ovn     | `name`, `ip`, `mac`                                |
-| VPC             | cloud   | `name`, `cidr`                                     |
+| VPC             | cloud   | `name`, `cidr`, `region`                           |
 | Subnet          | cloud   | `name`, `cidr`, `zone`                             |
 | Gateway         | cloud   | `name`, `kind` (nat/eip)                           |
 | SecurityGroup   | cloud   | `name`, `rules[]`                                  |
@@ -94,6 +95,7 @@ OVN-Designer/
 - 云资源节点的展示名与徽标按厂商变化（`vendors.js` 的 `nodeLabelKey` / `nodeBadge`）：
   i18n 中 `nodes.vpc` / `nodes.subnet` / `nodes.instance` 等为按厂商分组的对象。
 - Terraform 导出按厂商分发（`export/terraform/index.js`）；OVN 导出与厂商无关。
+- VPC 的「地域」按当前厂商从 `regions.js` 下拉选择；Terraform 导出的 provider 默认地域取自首个 VPC 的 `region`。
 
 ### OVN 导出（按执行节点拆分）
 

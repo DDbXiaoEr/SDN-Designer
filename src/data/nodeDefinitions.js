@@ -1,6 +1,8 @@
 // 节点类型元数据：定义所有可拖拽的网络节点类型、默认属性、展示摘要与连接规则
 // label / summary 键为 i18n key，组件中通过 t() 翻译
 
+import { defaultRegion, regionOptions } from './regions.js'
+
 export const CATEGORIES = {
   ovn: { label: 'categories.ovn', color: 'var(--ovn)' },
   cloud: { label: 'categories.cloud', color: 'var(--cloud)' },
@@ -103,15 +105,25 @@ export const NODE_TYPES = {
     category: 'cloud',
     label: 'nodes.vpc',
     badge: 'VPC',
-    defaults: () => ({
+    defaults: (vendor) => ({
       name: 'vpc1',
       cidr: '10.0.0.0/16',
+      region: defaultRegion(vendor),
     }),
     fields: [
       { key: 'name', label: 'fields.name', type: 'text' },
       { key: 'cidr', label: 'fields.cidr', type: 'text' },
+      {
+        key: 'region',
+        label: 'fields.region',
+        type: 'select',
+        options: (vendor) => regionOptions(vendor),
+      },
     ],
-    summary: (d) => [['summary.cidr', d.cidr]],
+    summary: (d) => [
+      ['summary.cidr', d.cidr],
+      ['summary.region', d.region],
+    ],
   },
   Subnet: {
     category: 'cloud',

@@ -1,5 +1,11 @@
 import { buildGraph, slug } from '../utils.js'
 
+// 取首个配置了地域的 VPC 的地域，作为 Terraform provider 的默认地域
+export function resolveVpcRegion(nodes, fallback) {
+  const vpc = nodes.find((n) => n.type === 'VPC' && n.data && n.data.region)
+  return vpc ? vpc.data.region : fallback
+}
+
 // 云资源导出共享上下文：资源唯一命名、引用解析、VPC/子网归属
 export function createCloudContext(nodes, edges, resourceTypes) {
   const { byId, sourceNodes, targetNodes } = buildGraph(nodes, edges)

@@ -1,4 +1,4 @@
-import { createCloudContext, resolveNextHopNode, parsePortRange } from './common.js'
+import { createCloudContext, resolveNextHopNode, parsePortRange, resolveVpcRegion } from './common.js'
 import { translate } from '../../i18n/index.js'
 
 const tt = (key) => translate(`export.${key}`)
@@ -15,7 +15,7 @@ const resourceTypes = {
   routeEntry: 'huaweicloud_vpc_route',
 }
 
-const header = `terraform {
+const header = (region) => `terraform {
   required_providers {
     huaweicloud = {
       source  = "huaweicloud/huaweicloud"
@@ -30,7 +30,7 @@ provider "huaweicloud" {
 
 variable "region" {
   type    = string
-  default = "cn-north-4"
+  default = "${region}"
 }
 `
 
@@ -42,7 +42,7 @@ function hwProtocol(protocol) {
 export function exportHuaweiTerraform(nodes, edges) {
   const ctx = createCloudContext(nodes, edges, resourceTypes)
   const { ref, findVpc, findSubnet } = ctx
-  const blocks = [header]
+  const blocks = [header(resolveVpcRegion(nodes, 'cn-north-4'))]
 
   for (const vpc of nodes.filter((n) => n.type === 'VPC')) {
     blocks.push(`resource "huaweicloud_vpc" "${ctx.name(vpc)}" {

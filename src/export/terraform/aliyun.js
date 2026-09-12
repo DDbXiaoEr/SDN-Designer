@@ -1,4 +1,4 @@
-import { createCloudContext, resolveNextHopNode } from './common.js'
+import { createCloudContext, resolveNextHopNode, resolveVpcRegion } from './common.js'
 import { translate } from '../../i18n/index.js'
 
 const tt = (key) => translate(`export.${key}`)
@@ -15,7 +15,7 @@ const resourceTypes = {
   routeEntry: 'alicloud_route_entry',
 }
 
-const header = `terraform {
+const header = (region) => `terraform {
   required_providers {
     alicloud = {
       source  = "aliyun/alicloud"
@@ -30,14 +30,14 @@ provider "alicloud" {
 
 variable "region" {
   type    = string
-  default = "cn-hangzhou"
+  default = "${region}"
 }
 `
 
 export function exportAliyunTerraform(nodes, edges) {
   const ctx = createCloudContext(nodes, edges, resourceTypes)
   const { ref, findVpc, findSubnet } = ctx
-  const blocks = [header]
+  const blocks = [header(resolveVpcRegion(nodes, 'cn-hangzhou'))]
 
   for (const vpc of nodes.filter((n) => n.type === 'VPC')) {
     blocks.push(`resource "alicloud_vpc" "${ctx.name(vpc)}" {

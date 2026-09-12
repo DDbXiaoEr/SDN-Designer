@@ -1,4 +1,4 @@
-import { createCloudContext, resolveNextHopNode, parsePortRange } from './common.js'
+import { createCloudContext, resolveNextHopNode, parsePortRange, resolveVpcRegion } from './common.js'
 import { translate } from '../../i18n/index.js'
 
 const tt = (key) => translate(`export.${key}`)
@@ -15,7 +15,7 @@ const resourceTypes = {
   routeEntry: 'aws_route',
 }
 
-const header = `terraform {
+const header = (region) => `terraform {
   required_providers {
     aws = {
       source  = "hashicorp/aws"
@@ -30,7 +30,7 @@ provider "aws" {
 
 variable "region" {
   type    = string
-  default = "us-east-1"
+  default = "${region}"
 }
 `
 
@@ -43,7 +43,7 @@ function awsProtocol(protocol) {
 export function exportAwsTerraform(nodes, edges) {
   const ctx = createCloudContext(nodes, edges, resourceTypes)
   const { ref, findVpc, findSubnet } = ctx
-  const blocks = [header]
+  const blocks = [header(resolveVpcRegion(nodes, 'us-east-1'))]
 
   for (const vpc of nodes.filter((n) => n.type === 'VPC')) {
     blocks.push(`resource "aws_vpc" "${ctx.name(vpc)}" {

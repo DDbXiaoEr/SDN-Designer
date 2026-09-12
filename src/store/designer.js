@@ -3,6 +3,7 @@ import { useVueFlow } from '@vue-flow/core'
 import { NODE_TYPES } from '../data/nodeDefinitions.js'
 import { computeZones } from '../export/utils.js'
 import { saveToStorage, loadFromStorage } from './persistence.js'
+import { vendor } from './vendor.js'
 
 const KEY = Symbol('ovn-designer')
 
@@ -68,7 +69,7 @@ export function createDesigner() {
       id: nextId(type.toLowerCase()),
       type,
       position,
-      data: { ...def.defaults(), ...(dataOverrides || {}) },
+      data: { ...def.defaults(vendor.value), ...(dataOverrides || {}) },
     }
     vf.addNodes([node])
     return node

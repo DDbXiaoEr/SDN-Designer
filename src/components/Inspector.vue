@@ -21,6 +21,15 @@ function patch(key, value) {
   if (node.value) updateNodeData(node.value.id, { [key]: value })
 }
 
+function optionsFor(f) {
+  const opts = typeof f.options === 'function' ? f.options(vendor.value) : f.options || []
+  const cur = node.value.data[f.key]
+  if (cur != null && cur !== '' && !opts.some((o) => o.value === cur)) {
+    return [{ value: cur, label: cur }, ...opts]
+  }
+  return opts
+}
+
 function patchController(value) {
   patch('controller', value)
   if (!value) return
@@ -97,7 +106,7 @@ function nicPatch(i, key, value) {
       <div v-for="f in def.fields" :key="f.key" class="field">
         <label>{{ t(f.label) }}</label>
         <select v-if="f.type === 'select'" :value="node.data[f.key]" @change="patch(f.key, $event.target.value)">
-          <option v-for="o in f.options" :key="o.value" :value="o.value">{{ tl(o.label) }}</option>
+          <option v-for="o in optionsFor(f)" :key="o.value" :value="o.value">{{ tl(o.label) }}</option>
         </select>
         <input
           v-else-if="f.type === 'checkbox'"
