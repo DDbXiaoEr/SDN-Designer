@@ -92,6 +92,9 @@ export default {
     imageId: 'Image ID',
     instanceType: 'Instance Type',
     privateIp: 'Private IP',
+    loginType: 'Login Method',
+    keyPair: 'Login Key Pair',
+    password: 'Login Password',
     gatewayNat: 'NAT Gateway',
     gatewayEip: 'Elastic IP (EIP)',
   },
@@ -190,5 +193,6 @@ export default {
     unassociatedVpc: 'not associated with a VPC',
     unassociatedVswitch: 'not associated with a VSwitch',
     fillNextHop: 'please fill the next hop ID',
+    passwordUnsupported: 'AWS EC2 does not support password login; use a key pair or SSM',
   },
 }

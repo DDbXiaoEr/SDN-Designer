@@ -188,12 +188,26 @@ export const NODE_TYPES = {
       imageId: 'ubuntu_22_04_x64_20G_alibase_20240101.vhd',
       instanceType: 'ecs.t5-lc1m2.small',
       privateIp: '10.0.1.10',
+      loginType: 'keyPair',
+      keyPair: '',
+      password: '',
     }),
     fields: [
       { key: 'name', label: 'fields.name', type: 'text' },
       { key: 'imageId', label: 'fields.imageId', type: 'text' },
       { key: 'instanceType', label: 'fields.instanceType', type: 'text' },
       { key: 'privateIp', label: 'fields.privateIp', type: 'text' },
+      {
+        key: 'loginType',
+        label: 'fields.loginType',
+        type: 'select',
+        options: [
+          { value: 'keyPair', label: 'fields.keyPair' },
+          { value: 'password', label: 'fields.password' },
+        ],
+      },
+      { key: 'keyPair', label: 'fields.keyPair', type: 'text', when: (d) => d.loginType !== 'password' },
+      { key: 'password', label: 'fields.password', type: 'password', when: (d) => d.loginType === 'password' },
     ],
     summary: (d) => [
       ['summary.ip', d.privateIp],

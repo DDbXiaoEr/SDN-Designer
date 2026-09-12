@@ -1,4 +1,4 @@
-import { createCloudContext, resolveNextHopNode, parsePortRange, resolveVpcRegion } from './common.js'
+import { createCloudContext, resolveNextHopNode, parsePortRange, resolveVpcRegion, instanceLoginAuth } from './common.js'
 import { translate } from '../../i18n/index.js'
 
 const tt = (key) => translate(`export.${key}`)
@@ -111,10 +111,14 @@ export function exportHuaweiTerraform(nodes, edges) {
     const sgs = ctx.targetNodes(inst.id).filter((n) => n.type === 'SecurityGroup')
     const sgNames = sgs.map((s) => `"${s.data.name}"`)
     const sgLine = sgNames.length ? `\n  security_groups = [${sgNames.join(', ')}]` : ''
+    const auth = instanceLoginAuth(inst.data)
+    const authLine = auth.value
+      ? `\n  ${auth.type === 'password' ? 'admin_pass' : 'key_pair'} = "${auth.value}"`
+      : ''
     blocks.push(`resource "huaweicloud_compute_instance" "${ctx.name(inst)}" {
   name      = "${inst.data.name}"
   image_id  = "${inst.data.imageId}"
-  flavor_id = "${inst.data.instanceType}"
+  flavor_id = "${inst.data.instanceType}"${authLine}
 
   network {
     uuid        = ${subRef}

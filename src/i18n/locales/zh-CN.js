@@ -92,6 +92,9 @@ export default {
     imageId: '镜像 ID',
     instanceType: '实例规格',
     privateIp: '私网 IP',
+    loginType: '登录方式',
+    keyPair: '登录密钥对',
+    password: '登录密码',
     gatewayNat: 'NAT 网关',
     gatewayEip: '弹性公网 IP (EIP)',
   },
@@ -190,5 +193,6 @@ export default {
     unassociatedVpc: '未关联 VPC',
     unassociatedVswitch: '未关联交换机',
     fillNextHop: '请填写下一跳 ID',
+    passwordUnsupported: 'AWS EC2 不支持密码登录，请使用密钥对或 SSM',
   },
 }

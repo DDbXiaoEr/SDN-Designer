@@ -103,7 +103,7 @@ function nicPatch(i, key, value) {
         <button class="danger" @click="removeNode(node.id)">{{ t('common.delete') }}</button>
       </div>
 
-      <div v-for="f in def.fields" :key="f.key" class="field">
+      <div v-for="f in def.fields" v-show="!f.when || f.when(node.data)" :key="f.key" class="field">
         <label>{{ t(f.label) }}</label>
         <select v-if="f.type === 'select'" :value="node.data[f.key]" @change="patch(f.key, $event.target.value)">
           <option v-for="o in optionsFor(f)" :key="o.value" :value="o.value">{{ tl(o.label) }}</option>
@@ -113,6 +113,12 @@ function nicPatch(i, key, value) {
           type="checkbox"
           :checked="node.data[f.key]"
           @change="f.key === 'controller' ? patchController($event.target.checked) : patch(f.key, $event.target.checked)"
+        />
+        <input
+          v-else-if="f.type === 'password'"
+          type="password"
+          :value="node.data[f.key]"
+          @input="patch(f.key, $event.target.value)"
         />
         <input v-else :value="node.data[f.key]" @input="patch(f.key, $event.target.value)" />
       </div>

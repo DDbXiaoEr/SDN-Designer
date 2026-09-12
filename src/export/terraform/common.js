@@ -75,6 +75,14 @@ export function resolveNextHopNode(ctx, route, vpc) {
   return null
 }
 
+// 实例登录认证：password 优先，否则使用密钥对
+export function instanceLoginAuth(data) {
+  if (data && data.loginType === 'password') {
+    return { type: 'password', value: data.password || '' }
+  }
+  return { type: 'keyPair', value: (data && data.keyPair) || '' }
+}
+
 // 解析端口区间，返回 { from, to }；icmp/all 返回 null
 export function parsePortRange(port, protocol) {
   if (protocol === 'icmp' || protocol === 'all') return null

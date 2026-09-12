@@ -73,7 +73,7 @@ OVN-Designer/
 | Subnet          | cloud   | `name`, `cidr`, `zone`                             |
 | Gateway         | cloud   | `name`, `kind` (nat/eip)                           |
 | SecurityGroup   | cloud   | `name`, `rules[]`                                  |
-| Instance        | cloud   | `name`, `imageId`, `instanceType`, `privateIp`     |
+| Instance        | cloud   | `name`, `imageId`, `instanceType`, `privateIp`, `loginType`(keyPair/password), `keyPair`, `password` |
 | RouteTable      | cloud   | `name`, `routes[]`                                 |
 
 ### 连线（Edge）

@@ -1,4 +1,4 @@
-import { createCloudContext, resolveNextHopNode, parsePortRange, resolveVpcRegion } from './common.js'
+import { createCloudContext, resolveNextHopNode, parsePortRange, resolveVpcRegion, instanceLoginAuth } from './common.js'
 import { translate } from '../../i18n/index.js'
 
 const tt = (key) => translate(`export.${key}`)
@@ -128,11 +128,17 @@ export function exportAwsTerraform(nodes, edges) {
     const sgs = ctx.targetNodes(inst.id).filter((n) => n.type === 'SecurityGroup')
     const sgRefs = sgs.map((s) => ref(s) + '.id')
     const sgLine = sgRefs.length ? `\n  vpc_security_group_ids   = [${sgRefs.join(', ')}]` : ''
+    const auth = instanceLoginAuth(inst.data)
+    const authLine = auth.value
+      ? auth.type === 'password'
+        ? `\n  # ${tt('passwordUnsupported')}`
+        : `\n  key_name      = "${auth.value}"`
+      : ''
     blocks.push(`resource "aws_instance" "${ctx.name(inst)}" {
   ami           = "${inst.data.imageId}"
   instance_type = "${inst.data.instanceType}"
   subnet_id     = ${vswRef}${sgLine}
-  private_ip    = "${inst.data.privateIp}"
+  private_ip    = "${inst.data.privateIp}"${authLine}
 
   tags = {
     Name = "${inst.data.name}"

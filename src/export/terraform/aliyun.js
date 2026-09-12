@@ -1,4 +1,4 @@
-import { createCloudContext, resolveNextHopNode, resolveVpcRegion } from './common.js'
+import { createCloudContext, resolveNextHopNode, resolveVpcRegion, instanceLoginAuth } from './common.js'
 import { translate } from '../../i18n/index.js'
 
 const tt = (key) => translate(`export.${key}`)
@@ -104,12 +104,16 @@ export function exportAliyunTerraform(nodes, edges) {
     const sgs = ctx.targetNodes(inst.id).filter((n) => n.type === 'SecurityGroup')
     const sgRefs = sgs.map((s) => ref(s) + '.id')
     const sgLine = sgRefs.length ? `\n  security_groups            = [${sgRefs.join(', ')}]` : ''
+    const auth = instanceLoginAuth(inst.data)
+    const authLine = auth.value
+      ? `\n  ${auth.type === 'password' ? 'password' : 'key_name'}                   = "${auth.value}"`
+      : ''
     blocks.push(`resource "alicloud_instance" "${ctx.name(inst)}" {
   instance_name              = "${inst.data.name}"
   instance_type              = "${inst.data.instanceType}"
   image_id                   = "${inst.data.imageId}"
   vswitch_id                 = ${vswRef}${sgLine}
-  private_ip                 = "${inst.data.privateIp}"
+  private_ip                 = "${inst.data.privateIp}"${authLine}
   internet_max_bandwidth_out = 0
 }`)
   }

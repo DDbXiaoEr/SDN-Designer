@@ -1,4 +1,4 @@
-import { createCloudContext, resolveNextHopNode, resolveVpcRegion } from './common.js'
+import { createCloudContext, resolveNextHopNode, resolveVpcRegion, instanceLoginAuth } from './common.js'
 import { translate } from '../../i18n/index.js'
 
 const tt = (key) => translate(`export.${key}`)
@@ -107,13 +107,19 @@ export function exportTencentTerraform(nodes, edges) {
     const sgs = ctx.targetNodes(inst.id).filter((n) => n.type === 'SecurityGroup')
     const sgRefs = sgs.map((s) => ref(s) + '.id')
     const sgLine = sgRefs.length ? `\n  security_groups = [${sgRefs.join(', ')}]` : ''
+    const auth = instanceLoginAuth(inst.data)
+    const authLine = auth.value
+      ? auth.type === 'password'
+        ? `\n  password      = "${auth.value}"`
+        : `\n  key_ids       = ["${auth.value}"]`
+      : ''
     blocks.push(`resource "tencentcloud_instance" "${ctx.name(inst)}" {
   instance_name = "${inst.data.name}"
   image_id      = "${inst.data.imageId}"
   instance_type = "${inst.data.instanceType}"
   vpc_id        = ${vpcRef}
   subnet_id     = ${subRef}
-  private_ip    = "${inst.data.privateIp}"${sgLine}
+  private_ip    = "${inst.data.privateIp}"${authLine}${sgLine}
 }`)
   }
 
