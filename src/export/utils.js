@@ -43,7 +43,10 @@ export function buildGraph(nodes, edges) {
 }
 
 export function download(filename, text) {
-  const blob = new Blob([text], { type: 'text/plain;charset=utf-8' })
+  downloadBlob(filename, new Blob([text], { type: 'text/plain;charset=utf-8' }))
+}
+
+export function downloadBlob(filename, blob) {
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a')
   a.href = url
@@ -52,6 +55,90 @@ export function download(filename, text) {
   a.click()
   document.body.removeChild(a)
   setTimeout(() => URL.revokeObjectURL(url), 1000)
+}
+
+const CRC_TABLE = (() => {
+  const table = new Uint32Array(256)
+  for (let n = 0; n < 256; n++) {
+    let c = n
+    for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1
+    table[n] = c >>> 0
+  }
+  return table
+})()
+
+function crc32(bytes) {
+  let crc = 0xffffffff
+  for (let i = 0; i < bytes.length; i++) {
+    crc = CRC_TABLE[(crc ^ bytes[i]) & 0xff] ^ (crc >>> 8)
+  }
+  return (crc ^ 0xffffffff) >>> 0
+}
+
+// 生成 store 模式的 zip（无压缩），避免引入第三方依赖
+export function createZip(files) {
+  const encoder = new TextEncoder()
+  const entries = files.map((f) => {
+    const data = typeof f.content === 'string' ? encoder.encode(f.content) : f.content
+    return { nameBytes: encoder.encode(f.filename), data, crc: crc32(data) }
+  })
+
+  const now = new Date()
+  const dosTime = ((now.getHours() << 11) | (now.getMinutes() << 5) | (now.getSeconds() >> 1)) & 0xffff
+  const dosDate =
+    (((now.getFullYear() - 1980) << 9) | ((now.getMonth() + 1) << 5) | now.getDate()) & 0xffff
+
+  const parts = []
+  const central = []
+  let offset = 0
+
+  for (const entry of entries) {
+    const local = new Uint8Array(30 + entry.nameBytes.length)
+    const lv = new DataView(local.buffer)
+    lv.setUint32(0, 0x04034b50, true)
+    lv.setUint16(4, 20, true)
+    lv.setUint16(6, 0x0800, true)
+    lv.setUint16(8, 0, true)
+    lv.setUint16(10, dosTime, true)
+    lv.setUint16(12, dosDate, true)
+    lv.setUint32(14, entry.crc, true)
+    lv.setUint32(18, entry.data.length, true)
+    lv.setUint32(22, entry.data.length, true)
+    lv.setUint16(26, entry.nameBytes.length, true)
+    lv.setUint16(28, 0, true)
+    local.set(entry.nameBytes, 30)
+    parts.push(local, entry.data)
+
+    const cen = new Uint8Array(46 + entry.nameBytes.length)
+    const cv = new DataView(cen.buffer)
+    cv.setUint32(0, 0x02014b50, true)
+    cv.setUint16(4, 20, true)
+    cv.setUint16(6, 20, true)
+    cv.setUint16(8, 0x0800, true)
+    cv.setUint16(10, 0, true)
+    cv.setUint16(12, dosTime, true)
+    cv.setUint16(14, dosDate, true)
+    cv.setUint32(16, entry.crc, true)
+    cv.setUint32(20, entry.data.length, true)
+    cv.setUint32(24, entry.data.length, true)
+    cv.setUint16(28, entry.nameBytes.length, true)
+    cv.setUint32(42, offset, true)
+    cen.set(entry.nameBytes, 46)
+    central.push(cen)
+
+    offset += local.length + entry.data.length
+  }
+
+  const centralSize = central.reduce((sum, c) => sum + c.length, 0)
+  const eocd = new Uint8Array(22)
+  const ev = new DataView(eocd.buffer)
+  ev.setUint32(0, 0x06054b50, true)
+  ev.setUint16(8, entries.length, true)
+  ev.setUint16(10, entries.length, true)
+  ev.setUint32(12, centralSize, true)
+  ev.setUint32(16, offset, true)
+
+  return new Blob([...parts, ...central, eocd], { type: 'application/zip' })
 }
 
 export function slug(str) {

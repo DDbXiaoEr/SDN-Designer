@@ -1,4 +1,4 @@
-import { createCloudContext, resolveNextHopNode, resolveVpcRegion, resolveZone, instanceLoginAuth, collectKeyPairs, hclLines, clean } from './common.js'
+import { createCloudContext, resolveNextHopNode, resolveVpcRegion, resolveZone, instanceLoginAuth, collectKeyPairs, resolveInterconnects, routeTablesOfVpc, hclLines, clean } from './common.js'
 import { translate } from '../../i18n/index.js'
 
 const tt = (key) => translate(`export.${key}`)
@@ -13,6 +13,7 @@ const resourceTypes = {
   natGateway: 'alicloud_nat_gateway',
   routeTable: 'alicloud_route_table',
   routeEntry: 'alicloud_route_entry',
+  interconnect: 'alicloud_vpc_peer_connection',
 }
 
 const providerBlock = () => `terraform {
@@ -39,12 +40,14 @@ const variablesBlock = (region) => `variable "region" {
 variable "access_key" {
   type        = string
   description = "${tt('aliyunAccessKey')}"
+  default     = ""
   sensitive   = true
 }
 
 variable "secret_key" {
   type        = string
   description = "${tt('aliyunSecretKey')}"
+  default     = ""
   sensitive   = true
 }
 `
@@ -202,6 +205,30 @@ ${hclLines(rows)}
   nexthop_id            = ${nexthopId}
 }`)
     })
+  }
+
+  let peerSeq = 0
+  for (const { ic, pairs } of resolveInterconnects(ctx)) {
+    for (const pair of pairs) {
+      const peerRegion = clean(pair.a.data.region) || region
+      blocks.push(`resource "alicloud_vpc_peer_connection" "${ctx.name(ic)}_${pair.key}" {
+  vpc_id         = ${ref(pair.a)}.id
+  peer_vpc_id    = ${ref(pair.b)}.id
+  peer_region_id = "${peerRegion}"
+}`)
+    }
+    for (const pair of pairs) {
+      for (const [from, to] of [[pair.a, pair.b], [pair.b, pair.a]]) {
+        for (const rt of routeTablesOfVpc(ctx, from)) {
+          blocks.push(`resource "alicloud_route_entry" "${ctx.name(rt)}_peer_${peerSeq++}" {
+  route_table_id        = ${ref(rt)}.id
+  destination_cidrblock = "${to.data.cidr}"
+  nexthop_type          = "VpcPeer"
+  nexthop_id            = ${ref(ic)}_${pair.key}.id
+}`)
+        }
+      }
+    }
   }
 
   return {

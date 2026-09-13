@@ -2,12 +2,14 @@ export default {
   common: {
     appName: '虚拟网络设计器',
     delete: '删除',
+    edit: '编辑',
     cancel: '取消',
     confirm: '确定',
     copy: '复制',
     copied: '已复制',
     download: '下载',
     downloadAll: '下载全部',
+    downloadAllZip: '打包下载 (ZIP)',
     close: '关闭',
   },
   toolbar: {
@@ -83,6 +85,12 @@ export default {
       aws: '路由表',
       huawei: '路由表',
     },
+    interconnect: {
+      aliyun: 'VPC 对等连接',
+      tencent: 'VPC 对等连接',
+      aws: 'VPC 对等连接',
+      huawei: 'VPC 对等连接',
+    },
   },
   fields: {
     name: '名称',
@@ -144,9 +152,11 @@ export default {
     eipToInstance: '绑定实例',
     subnetToGateway: '部署网关',
     subnetToRouteTable: '关联路由表',
+    vpcToInterconnect: '接入对等连接',
   },
   inspector: {
     empty: '选中一个节点以编辑属性',
+    editHint: '双击节点可直接打开编辑弹窗',
     nicListTitle: '网卡列表（勾选「隧道」作为封装网卡）',
     sgRulesTitle: '安全组规则',
     routeEntriesTitle: '路由条目',
@@ -215,6 +225,8 @@ export default {
     fillNextHop: '请填写下一跳 ID',
     passwordUnsupported: 'AWS EC2 不支持密码登录，请使用密钥对或 SSM',
     warningsTitle: '检查提示',
+    credentialsTitle: '凭证（可选）',
+    credentialsHint: '仅在你填写时写入 variables.tf 的默认值；生成的文件会包含密钥，请勿提交到版本库。',
     zoneMismatch: '交换机 {subnet} 的可用区 {zone} 不属于地域 {region}，导出时已自动调整为 {expected}',
     aliyunAccessKey: '阿里云 AccessKey ID',
     aliyunSecretKey: '阿里云 AccessKey Secret',

@@ -20,7 +20,7 @@ export function createCloudContext(nodes, edges, resourceTypes) {
       resourceNames.set(n.id, count === 1 ? base : `${base}_${count}`)
     }
   }
-  ;['VPC', 'Subnet', 'Instance', 'SecurityGroup', 'Gateway', 'Eip', 'RouteTable'].forEach(assignUniqueNames)
+  ;['VPC', 'Subnet', 'Instance', 'SecurityGroup', 'Gateway', 'Eip', 'RouteTable', 'Interconnect'].forEach(assignUniqueNames)
 
   const name = (node) => resourceNames.get(node.id)
 
@@ -33,6 +33,7 @@ export function createCloudContext(nodes, edges, resourceTypes) {
     if (type === 'Gateway') return `${resourceTypes.natGateway}.${name(node)}`
     if (type === 'Eip') return `${resourceTypes.eip}.${name(node)}`
     if (type === 'RouteTable') return `${resourceTypes.routeTable}.${name(node)}`
+    if (type === 'Interconnect') return `${resourceTypes.interconnect}.${name(node)}`
     return null
   }
 
@@ -70,6 +71,29 @@ export function resolveNextHopNode(ctx, route, vpc) {
     return insts.find((i) => ctx.findVpc(i)?.id === vpc?.id) || insts[0] || null
   }
   return null
+}
+
+// 解析互联节点关联的 VPC 组合与两两对等连接（3 个及以上按全互联展开）
+export function resolveInterconnects(ctx) {
+  const { nodes, sourceNodes } = ctx
+  const links = []
+  for (const ic of nodes.filter((n) => n.type === 'Interconnect')) {
+    const vpcs = sourceNodes(ic.id).filter((n) => n.type === 'VPC')
+    if (vpcs.length < 2) continue
+    const pairs = []
+    for (let i = 0; i < vpcs.length; i++) {
+      for (let j = i + 1; j < vpcs.length; j++) {
+        pairs.push({ a: vpcs[i], b: vpcs[j], key: `${i}_${j}` })
+      }
+    }
+    links.push({ ic, vpcs, pairs })
+  }
+  return links
+}
+
+// 返回 VPC 关联的路由表节点
+export function routeTablesOfVpc(ctx, vpc) {
+  return ctx.nodes.filter((n) => n.type === 'RouteTable' && ctx.findVpc(n)?.id === vpc.id)
 }
 
 // 将 [key, value] 列表格式化为键名对齐的 HCL 属性行

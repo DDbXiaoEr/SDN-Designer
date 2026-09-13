@@ -1,4 +1,4 @@
-import { createCloudContext, resolveNextHopNode, resolveVpcRegion, resolveZone, instanceLoginAuth, collectKeyPairs, tlsKeyBlocks, hclLines, clean } from './common.js'
+import { createCloudContext, resolveNextHopNode, resolveVpcRegion, resolveZone, instanceLoginAuth, collectKeyPairs, resolveInterconnects, routeTablesOfVpc, tlsKeyBlocks, hclLines, clean } from './common.js'
 import { translate } from '../../i18n/index.js'
 
 const tt = (key) => translate(`export.${key}`)
@@ -13,6 +13,7 @@ const resourceTypes = {
   natGateway: 'tencentcloud_nat_gateway',
   routeTable: 'tencentcloud_route_table',
   routeEntry: 'tencentcloud_route_entry',
+  interconnect: 'tencentcloud_vpc_peering_connection',
 }
 
 const providerBlock = () => `terraform {
@@ -47,12 +48,14 @@ const variablesBlock = (region) => `variable "region" {
 variable "secret_id" {
   type        = string
   description = "${tt('tencentSecretId')}"
+  default     = ""
   sensitive   = true
 }
 
 variable "secret_key" {
   type        = string
   description = "${tt('tencentSecretKey')}"
+  default     = ""
   sensitive   = true
 }
 `
@@ -227,6 +230,31 @@ ${hclLines(rows)}
   next_hub               = ${nextHub}
 }`)
     })
+  }
+
+  let peerSeq = 0
+  for (const { ic, pairs } of resolveInterconnects(ctx)) {
+    for (const pair of pairs) {
+      const peerRegion = clean(pair.a.data.region) || region
+      blocks.push(`resource "tencentcloud_vpc_peering_connection" "${ctx.name(ic)}_${pair.key}" {
+  vpc_id                  = ${ref(pair.a)}.id
+  peer_vpc_id             = ${ref(pair.b)}.id
+  peering_connection_name = "${clean(ic.data.name)}-${pair.key}"
+  peer_region             = "${peerRegion}"
+}`)
+    }
+    for (const pair of pairs) {
+      for (const [from, to] of [[pair.a, pair.b], [pair.b, pair.a]]) {
+        for (const rt of routeTablesOfVpc(ctx, from)) {
+          blocks.push(`resource "tencentcloud_route_entry" "${ctx.name(rt)}_peer_${peerSeq++}" {
+  route_table_id         = ${ref(rt)}.id
+  destination_cidr_block = "${to.data.cidr}"
+  next_type              = "PEER_CONNECTION"
+  next_hub               = ${ref(ic)}_${pair.key}.id
+}`)
+        }
+      }
+    }
   }
 
   return {

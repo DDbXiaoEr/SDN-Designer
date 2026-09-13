@@ -249,6 +249,17 @@ export const NODE_TYPES = {
     fields: [{ key: 'name', label: 'fields.name', type: 'text' }],
     summary: (d) => [['summary.routes', String(d.routes.length)]],
   },
+  Interconnect: {
+    category: 'cloud',
+    label: 'nodes.interconnect',
+    badge: 'PEER',
+    handles: { source: 1, target: 8 },
+    defaults: () => ({
+      name: 'peer1',
+    }),
+    fields: [{ key: 'name', label: 'fields.name', type: 'text' }],
+    summary: () => [['summary.type', 'VPC Peering']],
+  },
 }
 
 // 连接规则：source 类型 -> target 类型，带关系标签（i18n key）
@@ -266,6 +277,7 @@ export const CONNECTION_RULES = [
   { source: 'Subnet', target: 'Gateway', label: 'connections.subnetToGateway' },
   { source: 'Subnet', target: 'RouteTable', label: 'connections.subnetToRouteTable' },
   { source: 'VPC', target: 'RouteTable', label: 'connections.subnetToRouteTable' },
+  { source: 'VPC', target: 'Interconnect', label: 'connections.vpcToInterconnect' },
 ]
 
 export function canConnect(sourceType, targetType) {

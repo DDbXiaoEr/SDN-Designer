@@ -1,4 +1,4 @@
-import { createCloudContext, resolveNextHopNode, parsePortRange, resolveVpcRegion, resolveZone, instanceLoginAuth, collectKeyPairs, tlsKeyBlocks, hclLines, clean } from './common.js'
+import { createCloudContext, resolveNextHopNode, parsePortRange, resolveVpcRegion, resolveZone, instanceLoginAuth, collectKeyPairs, resolveInterconnects, routeTablesOfVpc, tlsKeyBlocks, hclLines, clean } from './common.js'
 import { translate } from '../../i18n/index.js'
 
 const tt = (key) => translate(`export.${key}`)
@@ -13,6 +13,7 @@ const resourceTypes = {
   natGateway: 'huaweicloud_nat_gateway',
   routeTable: 'huaweicloud_vpc_route_table',
   routeEntry: 'huaweicloud_vpc_route',
+  interconnect: 'huaweicloud_vpc_peering_connection',
 }
 
 const providerBlock = () => `terraform {
@@ -47,12 +48,14 @@ const variablesBlock = (region) => `variable "region" {
 variable "access_key" {
   type        = string
   description = "${tt('huaweiAccessKey')}"
+  default     = ""
   sensitive   = true
 }
 
 variable "secret_key" {
   type        = string
   description = "${tt('huaweiSecretKey')}"
+  default     = ""
   sensitive   = true
 }
 `
@@ -240,6 +243,29 @@ ${hclLines(rows)}
   nexthop     = ${nexthop}
 }`)
     })
+  }
+
+  let peerSeq = 0
+  for (const { ic, pairs } of resolveInterconnects(ctx)) {
+    for (const pair of pairs) {
+      blocks.push(`resource "huaweicloud_vpc_peering_connection" "${ctx.name(ic)}_${pair.key}" {
+  name        = "${clean(ic.data.name)}-${pair.key}"
+  vpc_id      = ${ref(pair.a)}.id
+  peer_vpc_id = ${ref(pair.b)}.id
+}`)
+    }
+    for (const pair of pairs) {
+      for (const [from, to] of [[pair.a, pair.b], [pair.b, pair.a]]) {
+        for (const rt of routeTablesOfVpc(ctx, from)) {
+          blocks.push(`resource "huaweicloud_vpc_route" "${ctx.name(rt)}_peer_${peerSeq++}" {
+  vpc_id      = ${ref(from)}.id
+  destination = "${to.data.cidr}"
+  type        = "peering"
+  nexthop     = ${ref(ic)}_${pair.key}.id
+}`)
+        }
+      }
+    }
   }
 
   return {

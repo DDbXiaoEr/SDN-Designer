@@ -19,6 +19,7 @@ import Toolbar from './components/Toolbar.vue'
 import Inspector from './components/Inspector.vue'
 import ExportModal from './components/ExportModal.vue'
 import CreateHostDialog from './components/CreateHostDialog.vue'
+import NodeEditorDialog from './components/NodeEditorDialog.vue'
 
 import '@vue-flow/core/dist/style.css'
 import '@vue-flow/core/dist/theme-default.css'
@@ -32,6 +33,8 @@ const { t } = useI18n()
 
 const exportModal = ref(null)
 const hostDialogOpen = ref(false)
+const editorOpen = ref(false)
+const editorNodeId = ref(null)
 const pendingDropPosition = ref(null)
 const fileInput = ref(null)
 
@@ -94,6 +97,18 @@ function onNodeClick({ node }) {
   selectedId.value = node.id
 }
 
+function onNodeDoubleClick({ node }) {
+  selectedId.value = node.id
+  editorNodeId.value = node.id
+  editorOpen.value = true
+}
+
+function onEditSelected() {
+  if (!selectedId.value) return
+  editorNodeId.value = selectedId.value
+  editorOpen.value = true
+}
+
 function onEdgeClick({ edge }) {
   const src = nodes.value.find((n) => n.id === edge.source)
   const tgt = nodes.value.find((n) => n.id === edge.target)
@@ -143,7 +158,26 @@ function showOvn() {
       filename: tg.filename,
     })),
   ]
-  exportModal.value = { title: t('export.ovnTitle'), groups }
+  exportModal.value = { title: t('export.ovnTitle'), groups, zipName: 'ovn-commands' }
+}
+
+const CREDENTIAL_FIELDS = {
+  aliyun: [
+    { key: 'access_key', label: 'export.aliyunAccessKey' },
+    { key: 'secret_key', label: 'export.aliyunSecretKey' },
+  ],
+  tencent: [
+    { key: 'secret_id', label: 'export.tencentSecretId' },
+    { key: 'secret_key', label: 'export.tencentSecretKey' },
+  ],
+  aws: [
+    { key: 'access_key', label: 'export.awsAccessKey' },
+    { key: 'secret_key', label: 'export.awsSecretKey' },
+  ],
+  huawei: [
+    { key: 'access_key', label: 'export.huaweiAccessKey' },
+    { key: 'secret_key', label: 'export.huaweiSecretKey' },
+  ],
 }
 
 function showTerraform() {
@@ -165,6 +199,8 @@ function showTerraform() {
       filename: f.filename,
     })),
     warnings,
+    zipName: `terraform-${vendor.value}`,
+    credentialFields: CREDENTIAL_FIELDS[vendor.value] || [],
   }
 }
 
@@ -201,6 +237,7 @@ const nodesCount = computed(() => nodes.value.length)
           @dragover="onDragOver"
           @connect="onConnect"
           @node-click="onNodeClick"
+          @node-double-click="onNodeDoubleClick"
           @edge-click="onEdgeClick"
           @pane-click="onPaneClick"
         >
@@ -209,7 +246,7 @@ const nodesCount = computed(() => nodes.value.length)
           <MiniMap :pannable="true" :zoomable="true" />
         </VueFlow>
       </div>
-      <Inspector />
+      <Inspector @edit="onEditSelected" />
     </div>
 
     <ExportModal
@@ -217,6 +254,8 @@ const nodesCount = computed(() => nodes.value.length)
       :title="exportModal.title"
       :groups="exportModal.groups"
       :warnings="exportModal.warnings"
+      :zip-name="exportModal.zipName"
+      :credential-fields="exportModal.credentialFields || []"
       @close="exportModal = null"
     />
 
@@ -224,6 +263,12 @@ const nodesCount = computed(() => nodes.value.length)
       v-if="hostDialogOpen"
       @confirm="onHostConfirm"
       @cancel="onHostCancel"
+    />
+
+    <NodeEditorDialog
+      v-if="editorOpen"
+      :node-id="editorNodeId"
+      @close="editorOpen = false"
     />
 
     <input

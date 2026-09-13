@@ -1,4 +1,4 @@
-import { createCloudContext, resolveNextHopNode, parsePortRange, resolveVpcRegion, resolveZone, instanceLoginAuth, collectKeyPairs, tlsKeyBlocks, clean } from './common.js'
+import { createCloudContext, resolveNextHopNode, parsePortRange, resolveVpcRegion, resolveZone, instanceLoginAuth, collectKeyPairs, resolveInterconnects, routeTablesOfVpc, tlsKeyBlocks, clean } from './common.js'
 import { translate } from '../../i18n/index.js'
 
 const tt = (key) => translate(`export.${key}`)
@@ -13,6 +13,7 @@ const resourceTypes = {
   natGateway: 'aws_nat_gateway',
   routeTable: 'aws_route_table',
   routeEntry: 'aws_route',
+  interconnect: 'aws_vpc_peering_connection',
 }
 
 const providerBlock = () => `terraform {
@@ -47,12 +48,14 @@ const variablesBlock = (region) => `variable "region" {
 variable "access_key" {
   type        = string
   description = "${tt('awsAccessKey')}"
+  default     = ""
   sensitive   = true
 }
 
 variable "secret_key" {
   type        = string
   description = "${tt('awsSecretKey')}"
+  default     = ""
   sensitive   = true
 }
 `
@@ -229,6 +232,28 @@ ${tlsKeyBlocks(keyName, resName)}`)
 ${hopLine}
 }`)
     })
+  }
+
+  let peerSeq = 0
+  for (const { ic, pairs } of resolveInterconnects(ctx)) {
+    for (const pair of pairs) {
+      blocks.push(`resource "aws_vpc_peering_connection" "${ctx.name(ic)}_${pair.key}" {
+  vpc_id      = ${ref(pair.a)}.id
+  peer_vpc_id = ${ref(pair.b)}.id
+  auto_accept = true
+}`)
+    }
+    for (const pair of pairs) {
+      for (const [from, to] of [[pair.a, pair.b], [pair.b, pair.a]]) {
+        for (const rt of routeTablesOfVpc(ctx, from)) {
+          blocks.push(`resource "aws_route" "${ctx.name(rt)}_peer_${peerSeq++}" {
+  route_table_id            = ${ref(rt)}.id
+  destination_cidr_block    = "${to.data.cidr}"
+  vpc_peering_connection_id = ${ref(ic)}_${pair.key}.id
+}`)
+        }
+      }
+    }
   }
 
   return {

@@ -1,25 +1,53 @@
 <script setup>
-import { ref, computed } from 'vue'
+import { ref, computed, reactive } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { download } from '../export/utils.js'
+import { download, downloadBlob, createZip } from '../export/utils.js'
 
 const props = defineProps({
   title: { type: String, required: true },
   groups: { type: Array, required: true },
   warnings: { type: Array, default: () => [] },
+  zipName: { type: String, default: 'export' },
+  credentialFields: { type: Array, default: () => [] },
+  credentialGroupId: { type: String, default: 'variables' },
 })
 
 const emit = defineEmits(['close'])
 const { t } = useI18n()
 const copied = ref(false)
 const selectedId = ref(props.groups.length ? props.groups[0].id : null)
+const credentials = reactive({})
+const credentialsOpen = ref(false)
 
 const selected = computed(() => props.groups.find((g) => g.id === selectedId.value) || props.groups[0])
 const hasSelector = computed(() => props.groups.length > 1)
 
+function hclEscape(value) {
+  return String(value).replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\r?\n/g, '\\n')
+}
+
+// 将填写的凭证注入 variables.tf 对应变量的 default，未填写则保持 default = ""
+function injectCredentials(content) {
+  let out = content
+  for (const f of props.credentialFields) {
+    const value = credentials[f.key]
+    if (value == null || value === '') continue
+    const re = new RegExp(`(variable\\s+"${f.key}"\\s*\\{[^}]*?default\\s*=\\s*)"[^"]*"`)
+    out = out.replace(re, `$1"${hclEscape(value)}"`)
+  }
+  return out
+}
+
+function contentOf(group) {
+  if (!group) return ''
+  return group.id === props.credentialGroupId ? injectCredentials(group.content) : group.content
+}
+
+const selectedContent = computed(() => contentOf(selected.value))
+
 async function copy() {
   try {
-    await navigator.clipboard.writeText(selected.value.content)
+    await navigator.clipboard.writeText(selectedContent.value)
     copied.value = true
     setTimeout(() => (copied.value = false), 1500)
   } catch {
@@ -28,7 +56,14 @@ async function copy() {
 }
 
 function downloadAll() {
-  props.groups.forEach((g) => download(g.filename, g.content))
+  if (props.groups.length > 1) {
+    const blob = createZip(
+      props.groups.map((g) => ({ filename: g.filename, content: contentOf(g) }))
+    )
+    downloadBlob(`${props.zipName}.zip`, blob)
+    return
+  }
+  props.groups.forEach((g) => download(g.filename, contentOf(g)))
 }
 </script>
 
@@ -42,8 +77,8 @@ function downloadAll() {
             <option v-for="g in groups" :key="g.id" :value="g.id">{{ g.label }}</option>
           </select>
           <button @click="copy">{{ copied ? t('common.copied') : t('common.copy') }}</button>
-          <button @click="download(selected.filename, selected.content)">{{ t('common.download') }}</button>
-          <button v-if="hasSelector" @click="downloadAll">{{ t('common.downloadAll') }}</button>
+          <button @click="download(selected.filename, selectedContent)">{{ t('common.download') }}</button>
+          <button v-if="hasSelector" @click="downloadAll">{{ t('common.downloadAllZip') }}</button>
           <button class="close" @click="emit('close')">{{ t('common.close') }}</button>
         </div>
       </div>
@@ -53,7 +88,20 @@ function downloadAll() {
           <li v-for="(w, i) in warnings" :key="i">{{ w }}</li>
         </ul>
       </div>
-      <pre class="content">{{ selected.content }}</pre>
+      <div v-if="credentialFields.length" class="credentials">
+        <button type="button" class="credentials-toggle" @click="credentialsOpen = !credentialsOpen">
+          <span>{{ credentialsOpen ? '▾' : '▸' }}</span>
+          {{ t('export.credentialsTitle') }}
+        </button>
+        <div v-if="credentialsOpen" class="credentials-body">
+          <p class="credentials-hint">{{ t('export.credentialsHint') }}</p>
+          <div v-for="f in credentialFields" :key="f.key" class="credential-field">
+            <label>{{ t(f.label) }}</label>
+            <input v-model="credentials[f.key]" type="password" autocomplete="off" spellcheck="false" />
+          </div>
+        </div>
+      </div>
+      <pre class="content">{{ selectedContent }}</pre>
     </div>
   </div>
 </template>
@@ -128,6 +176,53 @@ function downloadAll() {
 .warnings ul {
   margin: 0;
   padding-left: 18px;
+}
+.credentials {
+  border-bottom: 1px solid var(--border);
+  background: var(--panel-2);
+}
+.credentials-toggle {
+  width: 100%;
+  text-align: left;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  padding: 10px 16px;
+  font-size: 12px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.credentials-body {
+  padding: 0 16px 12px;
+}
+.credentials-hint {
+  margin: 0 0 8px;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--danger);
+}
+.credential-field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.credential-field label {
+  flex: 0 0 160px;
+  font-size: 11px;
+  color: var(--text-dim);
+}
+.credential-field input {
+  flex: 1;
+  min-width: 0;
+  padding: 6px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--panel);
+  color: var(--text);
+  font-size: 12px;
 }
 .content {
   flex: 1;

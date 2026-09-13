@@ -32,6 +32,7 @@ const CLOUD_BADGES = {
   SecurityGroup: { aliyun: 'SG', tencent: 'SG', aws: 'SG', huawei: 'SG' },
   Instance: { aliyun: 'ECS', tencent: 'CVM', aws: 'EC2', huawei: 'ECS' },
   RouteTable: { aliyun: 'RT', tencent: 'RT', aws: 'RT', huawei: 'RT' },
+  Interconnect: { aliyun: 'PEER', tencent: 'PEER', aws: 'PEER', huawei: 'PEER' },
 }
 
 export function nodeBadge(type, vendor) {

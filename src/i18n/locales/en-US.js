@@ -2,12 +2,14 @@ export default {
   common: {
     appName: 'Virtual Network Designer',
     delete: 'Delete',
+    edit: 'Edit',
     cancel: 'Cancel',
     confirm: 'Confirm',
     copy: 'Copy',
     copied: 'Copied',
     download: 'Download',
     downloadAll: 'Download all',
+    downloadAllZip: 'Download all (.zip)',
     close: 'Close',
   },
   toolbar: {
@@ -83,6 +85,12 @@ export default {
       aws: 'Route Table',
       huawei: 'Route Table',
     },
+    interconnect: {
+      aliyun: 'VPC Peering',
+      tencent: 'VPC Peering',
+      aws: 'VPC Peering',
+      huawei: 'VPC Peering',
+    },
   },
   fields: {
     name: 'Name',
@@ -144,9 +152,11 @@ export default {
     eipToInstance: 'associate instance',
     subnetToGateway: 'deploy gateway',
     subnetToRouteTable: 'associate route table',
+    vpcToInterconnect: 'join peering',
   },
   inspector: {
     empty: 'Select a node to edit its properties',
+    editHint: 'Double-click a node to open the editor',
     nicListTitle: 'NICs (check "Tunnel" to use as encapsulation NIC)',
     sgRulesTitle: 'Security Group Rules',
     routeEntriesTitle: 'Route Entries',
@@ -215,6 +225,8 @@ export default {
     fillNextHop: 'please fill the next hop ID',
     passwordUnsupported: 'AWS EC2 does not support password login; use a key pair or SSM',
     warningsTitle: 'Validation warnings',
+    credentialsTitle: 'Credentials (optional)',
+    credentialsHint: 'Written to the defaults in variables.tf only when filled; the generated files contain secrets, do not commit them.',
     zoneMismatch: 'Subnet {subnet} zone {zone} does not belong to region {region}; exported as {expected}',
     aliyunAccessKey: 'Alibaba Cloud AccessKey ID',
     aliyunSecretKey: 'Alibaba Cloud AccessKey Secret',

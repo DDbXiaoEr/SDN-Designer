@@ -38,11 +38,12 @@ OVN-Designer/
     ├── components/
     │   ├── Palette.vue        # 左侧节点库（可拖拽）
     │   ├── Toolbar.vue        # 顶部工具栏（厂商/语言切换/清空/导出）
-    │   ├── Inspector.vue      # 右侧属性面板（编辑选中节点）
+    │   ├── Inspector.vue      # 右侧属性面板（只读摘要 + 编辑/删除按钮）
+    │   ├── NodeEditorDialog.vue # 节点编辑弹窗（双击节点或点「编辑」打开）
     │   ├── CreateHostDialog.vue # 创建宿主机对话框（填写网卡信息）
-    │   └── ExportModal.vue    # 导出结果弹窗（按节点分组选择/复制/下载/关闭）
+    │   └── ExportModal.vue    # 导出结果弹窗（分组查看/复制/下载/打包 ZIP/填写凭证）
     ├── export/
-    │   ├── utils.js           # 通用工具：CIDR/MAC/图关系/computeZones/download
+    │   ├── utils.js           # 通用工具：CIDR/MAC/图关系/computeZones/download/createZip
     │   ├── ovn.js             # exportOvn(nodes, edges) -> {targets, all}（按执行节点拆分）
     │   └── terraform/
     │       ├── common.js      # 云资源导出共享上下文（命名/引用/VPC解析/下一跳）
@@ -80,6 +81,7 @@ OVN-Designer/
 | SecurityGroup   | cloud   | `name`, `rules[]`                                  |
 | Instance        | cloud   | `name`, `imageId`, `instanceType`, `chargeType`(subscription/payAsYouGo/spot), `privateIp`, `loginType`(keyPair/password), `keyPair`, `password` |
 | RouteTable      | cloud   | `name`, `routes[]`                                 |
+| Interconnect    | cloud   | `name`（VPC 对等连接，连接多个 VPC）               |
 
 ### 连线（Edge）
 
@@ -111,6 +113,11 @@ OVN-Designer/
   以 `images.js` / `instanceTypes.js` 的本地内置清单为基底，按 `value` 合并在线清单（同项在线覆盖）。
   在线来源通过构建时环境变量注入：`VITE_CATALOG_URL`（远程 JSON）优先，其次 `VITE_CATALOG_API_URL`
   （厂商 API 代理，支持 `{vendor}` / `{kind}` 占位符），配置见 `.env.example`；拉取失败时自动回退本地。
+- `Interconnect` 节点表示 VPC 对等连接：`VPC → Interconnect` 可连多个 VPC；导出时按两两全互联生成对等连接
+  （`alicloud_vpc_peer_connection` / `tencentcloud_vpc_peering_connection` / `aws_vpc_peering_connection` /
+  `huaweicloud_vpc_peering_connection`），并为每个接入 VPC 已有的 `RouteTable` 自动补一条指向该对等连接的路由条目。
+- 节点属性编辑在 `NodeEditorDialog` 弹窗中完成：双击节点或点击右侧面板的「编辑」打开；
+  `Inspector` 仅显示只读摘要与编辑/删除按钮。
 
 ### OVN 导出（按执行节点拆分）
 
