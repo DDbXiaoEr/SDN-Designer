@@ -72,8 +72,21 @@ An instance's image and instance type are based on a local built-in list, option
 - Local built-in: `src/data/images.js`, `src/data/instanceTypes.js`.
 - Online lists are injected via build-time environment variables, see [`.env.example`](./.env.example):
   - `VITE_CATALOG_URL`: remote JSON with the shape `{ "images": { "<vendor>": [{ "value", "label" }] }, "instanceTypes": { ... } }`; partial vendors are allowed.
-  - `VITE_CATALOG_API_URL`: a vendor API proxy (calling vendor APIs directly from the browser needs signing and CORS handling, so a backend proxy is recommended). If the URL contains `{vendor}` / `{kind}` placeholders it is requested per vendor/kind, otherwise it is expected to return the full catalog.
+  - `VITE_CATALOG_API_URL`: a vendor API proxy, see "Configuring the Vendor API Proxy" below.
 - If the online fetch fails, it falls back to the local list automatically and works offline.
+
+### Configuring the Vendor API Proxy
+
+Calling vendor APIs directly from the browser requires AK/SK signing and CORS handling, so a backend proxy that calls the vendor APIs and returns normalized results is recommended.
+
+1. Copy [`.env.example`](./.env.example) to `.env` and set `VITE_CATALOG_API_URL` (variables prefixed with `VITE_` are injected at build time).
+2. The proxy URL supports two modes (see `loadFromApi` in `src/store/catalog.js`):
+   - **Per-request**: if the URL contains `{vendor}` / `{kind}` placeholders, it requests each of the 4 vendors (`aliyun` / `tencent` / `aws` / `huawei`) × 2 kinds (`images` / `instanceTypes`) separately, e.g.:
+     ```bash
+     VITE_CATALOG_API_URL=https://catalog.example.com/api/{kind}/{vendor}
+     ```
+   - **Full catalog**: if the URL has no placeholders, it expects a single response with the shape `{ "images": { "<vendor>": [...] }, "instanceTypes": { ... } }`.
+3. Each catalog item can be a string, or `{ value, label }` (also accepts `{ id, name }`); the response can be a plain array or wrapped in `{ "items": [...] }` / `{ "values": [...] }`.
 
 ## Project Structure
 

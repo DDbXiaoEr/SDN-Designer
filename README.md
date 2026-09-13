@@ -72,8 +72,21 @@ npm run preview # 预览生产构建
 - 本地内置：`src/data/images.js`、`src/data/instanceTypes.js`。
 - 在线清单通过构建时环境变量注入，详见 [`.env.example`](./.env.example)：
   - `VITE_CATALOG_URL`：远程 JSON，结构 `{ "images": { "<vendor>": [{ "value", "label" }] }, "instanceTypes": { ... } }`，可只提供部分厂商。
-  - `VITE_CATALOG_API_URL`：厂商 API 代理地址（浏览器直连厂商 API 需处理签名与 CORS，建议由后端代理）。URL 含 `{vendor}` / `{kind}` 占位符时逐个请求，否则视为返回完整清单。
+  - `VITE_CATALOG_API_URL`：厂商 API 代理地址，见下方「配置厂商 API 代理」。
 - 在线拉取失败时自动回退本地清单，离线可用。
+
+### 配置厂商 API 代理
+
+浏览器直连云厂商 API 需要处理 AK/SK 签名与 CORS，建议由后端代理调用厂商接口、返回规范化结果。
+
+1. 复制 [`.env.example`](./.env.example) 为 `.env`，设置 `VITE_CATALOG_API_URL`（`VITE_` 前缀变量在构建时注入）。
+2. 代理地址支持两种模式（实现见 `src/store/catalog.js` 的 `loadFromApi`）：
+   - **按需请求**：URL 含 `{vendor}` / `{kind}` 占位符时，会对 4 个厂商（`aliyun` / `tencent` / `aws` / `huawei`）× 2 种类型（`images` / `instanceTypes`）分别发起请求，例如：
+     ```bash
+     VITE_CATALOG_API_URL=https://catalog.example.com/api/{kind}/{vendor}
+     ```
+   - **完整清单**：URL 不含占位符时，视为一次返回 `{ "images": { "<vendor>": [...] }, "instanceTypes": { ... } }`。
+3. 每个清单项可以是字符串，或 `{ value, label }`（也兼容 `{ id, name }`）；响应可直接返回数组，或包在 `{ "items": [...] }` / `{ "values": [...] }` 中。
 
 ## 项目结构
 
