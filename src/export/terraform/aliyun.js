@@ -1,4 +1,4 @@
-import { createCloudContext, resolveNextHopNode, resolveVpcRegion, instanceLoginAuth, hclLines } from './common.js'
+import { createCloudContext, resolveNextHopNode, resolveVpcRegion, resolveZone, instanceLoginAuth, collectKeyPairs, hclLines, clean } from './common.js'
 import { translate } from '../../i18n/index.js'
 
 const tt = (key) => translate(`export.${key}`)
@@ -74,7 +74,7 @@ export function exportAliyunTerraform(nodes, edges) {
 
   for (const vpc of nodes.filter((n) => n.type === 'VPC')) {
     blocks.push(`resource "alicloud_vpc" "${ctx.name(vpc)}" {
-  vpc_name   = "${vpc.data.name}"
+  vpc_name   = "${clean(vpc.data.name)}"
   cidr_block = "${vpc.data.cidr}"
 }`)
   }
@@ -84,9 +84,9 @@ export function exportAliyunTerraform(nodes, edges) {
     const vpcRef = vpc ? ref(vpc) + '.id' : `"" # ${tt('unassociatedVpc')}`
     blocks.push(`resource "alicloud_vswitch" "${ctx.name(sub)}" {
   vpc_id       = ${vpcRef}
-  vswitch_name = "${sub.data.name}"
+  vswitch_name = "${clean(sub.data.name)}"
   cidr_block   = "${sub.data.cidr}"
-  zone_id      = "${sub.data.zone}"
+  zone_id      = "${resolveZone(sub.data.zone, vpc?.data.region || region, 'aliyun')}"
 }`)
   }
 
@@ -94,8 +94,8 @@ export function exportAliyunTerraform(nodes, edges) {
     const vpc = findVpc(sg)
     const vpcRef = vpc ? ref(vpc) + '.id' : `"" # ${tt('unassociatedVpc')}`
     blocks.push(`resource "alicloud_security_group" "${ctx.name(sg)}" {
-  name   = "${sg.data.name}"
-  vpc_id = ${vpcRef}
+  security_group_name = "${clean(sg.data.name)}"
+  vpc_id              = ${vpcRef}
 }`)
     ;(sg.data.rules || []).forEach((rule, i) => {
       const ipProtocol = rule.protocol === 'icmp' ? 'icmp' : rule.protocol === 'all' ? 'all' : rule.protocol
@@ -119,7 +119,7 @@ export function exportAliyunTerraform(nodes, edges) {
     blocks.push(`resource "alicloud_nat_gateway" "${ctx.name(gw)}" {
   vpc_id           = ${vpcRef}
   vswitch_id       = ${vswRef}
-  nat_gateway_name = "${gw.data.name}"
+  nat_gateway_name = "${clean(gw.data.name)}"
   nat_type         = "Enhanced"
 }`)
   }
@@ -142,6 +142,14 @@ export function exportAliyunTerraform(nodes, edges) {
       })
   }
 
+  const keyPairs = collectKeyPairs(nodes)
+  for (const [keyName, resName] of keyPairs) {
+    blocks.push(`resource "alicloud_key_pair" "${resName}" {
+  key_name = "${keyName}"
+  key_file = "${keyName}.pem"
+}`)
+  }
+
   for (const inst of nodes.filter((n) => n.type === 'Instance')) {
     const sub = findSubnet(inst)
     const vswRef = sub ? ref(sub) + '.id' : `"" # ${tt('unassociatedVswitch')}`
@@ -149,16 +157,25 @@ export function exportAliyunTerraform(nodes, edges) {
     const sgRefs = sgs.map((s) => ref(s) + '.id')
     const auth = instanceLoginAuth(inst.data)
     const rows = [
-      ['instance_name', `"${inst.data.name}"`],
+      ['instance_name', `"${clean(inst.data.name)}"`],
       ['instance_type', `"${inst.data.instanceType}"`],
       ['image_id', `"${inst.data.imageId}"`],
       ...aliyunChargeRows(inst.data.chargeType),
       ['vswitch_id', vswRef],
       ['private_ip', `"${inst.data.privateIp}"`],
       ['internet_max_bandwidth_out', '0'],
+      ['system_disk_size', '40'],
     ]
     if (sgRefs.length) rows.push(['security_groups', `[${sgRefs.join(', ')}]`])
-    if (auth.value) rows.push([auth.type === 'password' ? 'password' : 'key_name', `"${auth.value}"`])
+    if (auth.value) {
+      if (auth.type === 'password') {
+        rows.push(['password', `"${auth.value}"`])
+      } else {
+        const keyName = clean(auth.value)
+        const resName = keyPairs.get(keyName)
+        rows.push(['key_name', `alicloud_key_pair.${resName}.key_name`])
+      }
+    }
     blocks.push(`resource "alicloud_instance" "${ctx.name(inst)}" {
 ${hclLines(rows)}
 }`)
@@ -169,7 +186,7 @@ ${hclLines(rows)}
     const vpcRef = vpc ? ref(vpc) + '.id' : `"" # ${tt('unassociatedVpc')}`
     blocks.push(`resource "alicloud_route_table" "${ctx.name(rt)}" {
   vpc_id           = ${vpcRef}
-  route_table_name = "${rt.data.name}"
+  route_table_name = "${clean(rt.data.name)}"
 }`)
     ;(rt.data.routes || []).forEach((route, i) => {
       let nexthopId = route.nextHop

@@ -24,9 +24,12 @@ OVN-Designer/
     │   ├── nodeDefinitions.js # 节点类型元数据（唯一数据源）
     │   ├── vendors.js         # 云厂商列表 + 资源名/徽标按厂商解析
     │   ├── regions.js         # 各云厂商地域列表与默认地域
-    │   └── chargeTypes.js     # 各云厂商实例计费方式（包年包月/按量付费/抢占式）
+    │   ├── chargeTypes.js     # 各云厂商实例计费方式（包年包月/按量付费/抢占式）
+    │   ├── images.js          # 各云厂商本地内置镜像列表（在线清单兜底）
+    │   └── instanceTypes.js   # 各云厂商本地内置实例规格列表（在线清单兜底）
     ├── store/
     │   ├── designer.js        # 状态管理（provide/inject 封装 useVueFlow）
+    │   ├── catalog.js         # 镜像/实例规格清单：本地内置 + 在线 JSON/厂商 API 合并
     │   └── vendor.js          # 当前云厂商（ref，持久化到 localStorage）
     ├── nodes/
     │   ├── BaseNode.vue       # 通用节点外观组件（徽标/名称/摘要/多连接点）
@@ -104,6 +107,10 @@ OVN-Designer/
   导出时映射为各厂商字段（如阿里云 `instance_charge_type` + `spot_strategy`，腾讯云 `instance_charge_type`，华为云 `charging_mode`，AWS `instance_market_options`）。
 - 独立 `Eip` 节点表示公网 IP；`Eip → Instance` 连线表示绑定到该实例，导出为厂商绑定资源
   （`alicloud_eip_association` / `tencentcloud_eip_association` / `huaweicloud_compute_eip_associate` / `aws_eip_association`）。
+- Instance 的「镜像」与「实例规格」为可编辑下拉（input + datalist），清单来自 `store/catalog.js`：
+  以 `images.js` / `instanceTypes.js` 的本地内置清单为基底，按 `value` 合并在线清单（同项在线覆盖）。
+  在线来源通过构建时环境变量注入：`VITE_CATALOG_URL`（远程 JSON）优先，其次 `VITE_CATALOG_API_URL`
+  （厂商 API 代理，支持 `{vendor}` / `{kind}` 占位符），配置见 `.env.example`；拉取失败时自动回退本地。
 
 ### OVN 导出（按执行节点拆分）
 

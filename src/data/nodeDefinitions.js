@@ -1,8 +1,9 @@
 // 节点类型元数据：定义所有可拖拽的网络节点类型、默认属性、展示摘要与连接规则
 // label / summary 键为 i18n key，组件中通过 t() 翻译
 
-import { defaultRegion, regionOptions } from './regions.js'
+import { defaultRegion, defaultZone, regionOptions } from './regions.js'
 import { chargeTypeOptions, defaultChargeType } from './chargeTypes.js'
+import { imageOptions, defaultImage, instanceTypeOptions, defaultInstanceType } from '../store/catalog.js'
 
 export const CATEGORIES = {
   ovn: { label: 'categories.ovn', color: 'var(--ovn)' },
@@ -130,10 +131,10 @@ export const NODE_TYPES = {
     category: 'cloud',
     label: 'nodes.subnet',
     badge: 'VSW',
-    defaults: () => ({
+    defaults: (vendor) => ({
       name: 'vsw1',
       cidr: '10.0.1.0/24',
-      zone: 'cn-hangzhou-b',
+      zone: defaultZone(vendor),
     }),
     fields: [
       { key: 'name', label: 'fields.name', type: 'text' },
@@ -199,10 +200,10 @@ export const NODE_TYPES = {
     category: 'cloud',
     label: 'nodes.instance',
     badge: 'ECS',
-    defaults: () => ({
+    defaults: (vendor) => ({
       name: 'ecs1',
-      imageId: 'ubuntu_22_04_x64_20G_alibase_20240101.vhd',
-      instanceType: 'ecs.t5-lc1m2.small',
+      imageId: defaultImage(vendor),
+      instanceType: defaultInstanceType(vendor),
       chargeType: defaultChargeType(),
       privateIp: '10.0.1.10',
       loginType: 'keyPair',
@@ -211,8 +212,8 @@ export const NODE_TYPES = {
     }),
     fields: [
       { key: 'name', label: 'fields.name', type: 'text' },
-      { key: 'imageId', label: 'fields.imageId', type: 'text' },
-      { key: 'instanceType', label: 'fields.instanceType', type: 'text' },
+      { key: 'imageId', label: 'fields.imageId', type: 'combo', options: (vendor) => imageOptions(vendor) },
+      { key: 'instanceType', label: 'fields.instanceType', type: 'combo', options: (vendor) => instanceTypeOptions(vendor) },
       {
         key: 'chargeType',
         label: 'fields.chargeType',

@@ -128,3 +128,12 @@ export function defaultRegion(vendor) {
   const list = VENDOR_REGIONS[vendor] || VENDOR_REGIONS[FALLBACK_VENDOR]
   return list[0]
 }
+
+const ZONE_SUFFIX = { aliyun: 'b', tencent: '1', aws: 'a', huawei: 'a' }
+const ZONE_SEPARATOR = { aliyun: '-', tencent: '-', aws: '', huawei: '' }
+
+// 各厂商默认可用区：默认地域 + 厂商可用区后缀格式
+export function defaultZone(vendor) {
+  const v = ZONE_SEPARATOR[vendor] !== undefined ? vendor : FALLBACK_VENDOR
+  return `${defaultRegion(v)}${ZONE_SEPARATOR[v]}${ZONE_SUFFIX[v]}`
+}

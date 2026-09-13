@@ -6,6 +6,7 @@ import { download } from '../export/utils.js'
 const props = defineProps({
   title: { type: String, required: true },
   groups: { type: Array, required: true },
+  warnings: { type: Array, default: () => [] },
 })
 
 const emit = defineEmits(['close'])
@@ -45,6 +46,12 @@ function downloadAll() {
           <button v-if="hasSelector" @click="downloadAll">{{ t('common.downloadAll') }}</button>
           <button class="close" @click="emit('close')">{{ t('common.close') }}</button>
         </div>
+      </div>
+      <div v-if="warnings.length" class="warnings">
+        <div class="warnings-title">{{ t('export.warningsTitle') }}</div>
+        <ul>
+          <li v-for="(w, i) in warnings" :key="i">{{ w }}</li>
+        </ul>
       </div>
       <pre class="content">{{ selected.content }}</pre>
     </div>
@@ -105,6 +112,22 @@ function downloadAll() {
   border-radius: 6px;
   padding: 6px 8px;
   font-size: 12px;
+}
+.warnings {
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--border);
+  background: rgba(248, 113, 113, 0.12);
+  color: var(--danger);
+  font-size: 12px;
+  line-height: 1.6;
+}
+.warnings-title {
+  font-weight: 700;
+  margin-bottom: 4px;
+}
+.warnings ul {
+  margin: 0;
+  padding-left: 18px;
 }
 .content {
   flex: 1;

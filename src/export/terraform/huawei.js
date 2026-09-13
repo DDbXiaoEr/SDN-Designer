@@ -1,4 +1,4 @@
-import { createCloudContext, resolveNextHopNode, parsePortRange, resolveVpcRegion, instanceLoginAuth, hclLines } from './common.js'
+import { createCloudContext, resolveNextHopNode, parsePortRange, resolveVpcRegion, resolveZone, instanceLoginAuth, collectKeyPairs, tlsKeyBlocks, hclLines, clean } from './common.js'
 import { translate } from '../../i18n/index.js'
 
 const tt = (key) => translate(`export.${key}`)
@@ -20,6 +20,14 @@ const providerBlock = () => `terraform {
     huaweicloud = {
       source  = "huaweicloud/huaweicloud"
       version = "~> 1.60"
+    }
+    tls = {
+      source  = "hashicorp/tls"
+      version = "~> 4.0"
+    }
+    local = {
+      source  = "hashicorp/local"
+      version = "~> 2.0"
     }
   }
 }
@@ -54,6 +62,13 @@ function hwProtocol(protocol) {
   return protocol
 }
 
+// 华为云实例镜像：ID 形如 UUID 时用 image_id，否则按镜像名称使用 image_name
+function huaweiImageRow(image) {
+  const value = clean(image)
+  if (/^[0-9a-f][0-9a-f-]{31,}$/i.test(value)) return ['image_id', `"${value}"`]
+  return ['image_name', `"${value}"`]
+}
+
 function huaweiChargeRows(chargeType) {
   if (chargeType === 'subscription') {
     return [
@@ -79,7 +94,7 @@ export function exportHuaweiTerraform(nodes, edges) {
 
   for (const vpc of nodes.filter((n) => n.type === 'VPC')) {
     blocks.push(`resource "huaweicloud_vpc" "${ctx.name(vpc)}" {
-  name = "${vpc.data.name}"
+  name = "${clean(vpc.data.name)}"
   cidr = "${vpc.data.cidr}"
 }`)
   }
@@ -88,16 +103,16 @@ export function exportHuaweiTerraform(nodes, edges) {
     const vpc = findVpc(sub)
     const vpcRef = vpc ? ref(vpc) + '.id' : `"" # ${tt('unassociatedVpc')}`
     blocks.push(`resource "huaweicloud_vpc_subnet" "${ctx.name(sub)}" {
-  name              = "${sub.data.name}"
+  name              = "${clean(sub.data.name)}"
   cidr              = "${sub.data.cidr}"
   vpc_id            = ${vpcRef}
-  availability_zone = "${sub.data.zone}"
+  availability_zone = "${resolveZone(sub.data.zone, vpc?.data.region || region, 'huawei')}"
 }`)
   }
 
   for (const sg of nodes.filter((n) => n.type === 'SecurityGroup')) {
     blocks.push(`resource "huaweicloud_networking_secgroup" "${ctx.name(sg)}" {
-  name = "${sg.data.name}"
+  name = "${clean(sg.data.name)}"
 }`)
     ;(sg.data.rules || []).forEach((rule, i) => {
       const port = parsePortRange(rule.port, rule.protocol)
@@ -122,7 +137,7 @@ export function exportHuaweiTerraform(nodes, edges) {
     type = "5_bgp"
   }
   bandwidth {
-    name        = "${eip.data.name}"
+    name        = "${clean(eip.data.name)}"
     share_type  = "PER"
     size        = ${Number(eip.data.bandwidth) || 5}
     charge_mode = "${chargeMode}"
@@ -145,31 +160,43 @@ export function exportHuaweiTerraform(nodes, edges) {
     const vpcRef = vpc ? ref(vpc) + '.id' : `"" # ${tt('unassociatedVpc')}`
     const subRef = sub ? ref(sub) + '.id' : `"" # ${tt('unassociatedVswitch')}`
     blocks.push(`resource "huaweicloud_nat_gateway" "${ctx.name(gw)}" {
-  name      = "${gw.data.name}"
+  name      = "${clean(gw.data.name)}"
   vpc_id    = ${vpcRef}
   subnet_id = ${subRef}
   spec      = "1"
 }`)
   }
 
+  const keyPairs = collectKeyPairs(nodes)
+  for (const [keyName, resName] of keyPairs) {
+    blocks.push(`resource "huaweicloud_compute_keypair" "${resName}" {
+  name       = "${keyName}"
+  public_key = tls_private_key.${resName}.public_key_openssh
+}
+
+${tlsKeyBlocks(keyName, resName)}`)
+  }
+
   for (const inst of nodes.filter((n) => n.type === 'Instance')) {
     const sub = findSubnet(inst)
     const subRef = sub ? ref(sub) + '.id' : `"" # ${tt('unassociatedVswitch')}`
     const sgs = ctx.targetNodes(inst.id).filter((n) => n.type === 'SecurityGroup')
-    const sgNames = sgs.map((s) => `"${s.data.name}"`)
+    const sgNames = sgs.map((s) => `"${clean(s.data.name)}"`)
     const auth = instanceLoginAuth(inst.data)
     const rows = [
-      ['name', `"${inst.data.name}"`],
-      ['image_id', `"${inst.data.imageId}"`],
+      ['name', `"${clean(inst.data.name)}"`],
+      huaweiImageRow(inst.data.imageId),
       ['flavor_id', `"${inst.data.instanceType}"`],
       ...huaweiChargeRows(inst.data.chargeType),
+      ['system_disk_size', '40'],
     ]
     if (auth.value) {
-      rows.push(
-        auth.type === 'password'
-          ? ['admin_pass', `"${auth.value}"`]
-          : ['key_pair', `"${auth.value}"`]
-      )
+      if (auth.type === 'password') {
+        rows.push(['admin_pass', `"${auth.value}"`])
+      } else {
+        const resName = keyPairs.get(clean(auth.value))
+        rows.push(['key_pair', `huaweicloud_compute_keypair.${resName}.name`])
+      }
     }
     if (sgNames.length) rows.push(['security_groups', `[${sgNames.join(', ')}]`])
     blocks.push(`resource "huaweicloud_compute_instance" "${ctx.name(inst)}" {
@@ -186,7 +213,7 @@ ${hclLines(rows)}
     const vpc = findVpc(rt)
     const vpcRef = vpc ? ref(vpc) + '.id' : `"" # ${tt('unassociatedVpc')}`
     blocks.push(`resource "huaweicloud_vpc_route_table" "${ctx.name(rt)}" {
-  name   = "${rt.data.name}"
+  name   = "${clean(rt.data.name)}"
   vpc_id = ${vpcRef}
 }`)
     ;(rt.data.routes || []).forEach((route, i) => {

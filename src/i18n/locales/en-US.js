@@ -214,6 +214,8 @@ export default {
     unassociatedVswitch: 'not associated with a VSwitch',
     fillNextHop: 'please fill the next hop ID',
     passwordUnsupported: 'AWS EC2 does not support password login; use a key pair or SSM',
+    warningsTitle: 'Validation warnings',
+    zoneMismatch: 'Subnet {subnet} zone {zone} does not belong to region {region}; exported as {expected}',
     aliyunAccessKey: 'Alibaba Cloud AccessKey ID',
     aliyunSecretKey: 'Alibaba Cloud AccessKey Secret',
     tencentSecretId: 'Tencent Cloud SecretId',

@@ -214,6 +214,8 @@ export default {
     unassociatedVswitch: '未关联交换机',
     fillNextHop: '请填写下一跳 ID',
     passwordUnsupported: 'AWS EC2 不支持密码登录，请使用密钥对或 SSM',
+    warningsTitle: '检查提示',
+    zoneMismatch: '交换机 {subnet} 的可用区 {zone} 不属于地域 {region}，导出时已自动调整为 {expected}',
     aliyunAccessKey: '阿里云 AccessKey ID',
     aliyunSecretKey: '阿里云 AccessKey Secret',
     tencentSecretId: '腾讯云 SecretId',

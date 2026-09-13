@@ -1,4 +1,4 @@
-import { createCloudContext, resolveNextHopNode, resolveVpcRegion, instanceLoginAuth, hclLines } from './common.js'
+import { createCloudContext, resolveNextHopNode, resolveVpcRegion, resolveZone, instanceLoginAuth, collectKeyPairs, tlsKeyBlocks, hclLines, clean } from './common.js'
 import { translate } from '../../i18n/index.js'
 
 const tt = (key) => translate(`export.${key}`)
@@ -20,6 +20,14 @@ const providerBlock = () => `terraform {
     tencentcloud = {
       source  = "tencentcloudstack/tencentcloud"
       version = "~> 1.81"
+    }
+    tls = {
+      source  = "hashicorp/tls"
+      version = "~> 4.0"
+    }
+    local = {
+      source  = "hashicorp/local"
+      version = "~> 2.0"
     }
   }
 }
@@ -80,7 +88,7 @@ export function exportTencentTerraform(nodes, edges) {
 
   for (const vpc of nodes.filter((n) => n.type === 'VPC')) {
     blocks.push(`resource "tencentcloud_vpc" "${ctx.name(vpc)}" {
-  name       = "${vpc.data.name}"
+  name       = "${clean(vpc.data.name)}"
   cidr_block = "${vpc.data.cidr}"
 }`)
   }
@@ -90,15 +98,15 @@ export function exportTencentTerraform(nodes, edges) {
     const vpcRef = vpc ? ref(vpc) + '.id' : `"" # ${tt('unassociatedVpc')}`
     blocks.push(`resource "tencentcloud_subnet" "${ctx.name(sub)}" {
   vpc_id            = ${vpcRef}
-  name              = "${sub.data.name}"
+  name              = "${clean(sub.data.name)}"
   cidr_block        = "${sub.data.cidr}"
-  availability_zone = "${sub.data.zone}"
+  availability_zone = "${resolveZone(sub.data.zone, vpc?.data.region || region, 'tencent')}"
 }`)
   }
 
   for (const sg of nodes.filter((n) => n.type === 'SecurityGroup')) {
     blocks.push(`resource "tencentcloud_security_group" "${ctx.name(sg)}" {
-  name = "${sg.data.name}"
+  name = "${clean(sg.data.name)}"
 }`)
     ;(sg.data.rules || []).forEach((rule, i) => {
       const portRange = rule.protocol === 'icmp' || rule.protocol === 'all' ? 'ALL' : rule.port
@@ -120,7 +128,7 @@ export function exportTencentTerraform(nodes, edges) {
         ? 'BANDWIDTH_POSTPAID_BY_HOUR'
         : 'TRAFFIC_POSTPAID_BY_HOUR'
     blocks.push(`resource "tencentcloud_eip" "${ctx.name(eip)}" {
-  name                       = "${eip.data.name}"
+  name                       = "${clean(eip.data.name)}"
   internet_charge_type       = "${internetChargeType}"
   internet_max_bandwidth_out = ${Number(eip.data.bandwidth) || 5}
 }`)
@@ -139,11 +147,21 @@ export function exportTencentTerraform(nodes, edges) {
     const vpc = findVpc(gw)
     const vpcRef = vpc ? ref(vpc) + '.id' : `"" # ${tt('unassociatedVpc')}`
     blocks.push(`resource "tencentcloud_nat_gateway" "${ctx.name(gw)}" {
-  name           = "${gw.data.name}"
+  name           = "${clean(gw.data.name)}"
   vpc_id         = ${vpcRef}
   bandwidth      = 100
   max_concurrent = 1000000
 }`)
+  }
+
+  const keyPairs = collectKeyPairs(nodes)
+  for (const [keyName, resName] of keyPairs) {
+    blocks.push(`resource "tencentcloud_key_pair" "${resName}" {
+  key_name   = "${keyName}"
+  public_key = tls_private_key.${resName}.public_key_openssh
+}
+
+${tlsKeyBlocks(keyName, resName)}`)
   }
 
   for (const inst of nodes.filter((n) => n.type === 'Instance')) {
@@ -155,21 +173,23 @@ export function exportTencentTerraform(nodes, edges) {
     const sgRefs = sgs.map((s) => ref(s) + '.id')
     const auth = instanceLoginAuth(inst.data)
     const rows = [
-      ['instance_name', `"${inst.data.name}"`],
+      ['instance_name', `"${clean(inst.data.name)}"`],
       ['image_id', `"${inst.data.imageId}"`],
       ['instance_type', `"${inst.data.instanceType}"`],
       ...tencentChargeRows(inst.data.chargeType),
       ['vpc_id', vpcRef],
       ['subnet_id', subRef],
       ['private_ip', `"${inst.data.privateIp}"`],
+      ['system_disk_size', '40'],
     ]
     if (sgRefs.length) rows.push(['security_groups', `[${sgRefs.join(', ')}]`])
     if (auth.value) {
-      rows.push(
-        auth.type === 'password'
-          ? ['password', `"${auth.value}"`]
-          : ['key_ids', `["${auth.value}"]`]
-      )
+      if (auth.type === 'password') {
+        rows.push(['password', `"${auth.value}"`])
+      } else {
+        const resName = keyPairs.get(clean(auth.value))
+        rows.push(['key_ids', `[tencentcloud_key_pair.${resName}.id]`])
+      }
     }
     blocks.push(`resource "tencentcloud_instance" "${ctx.name(inst)}" {
 ${hclLines(rows)}
@@ -180,7 +200,7 @@ ${hclLines(rows)}
     const vpc = findVpc(rt)
     const vpcRef = vpc ? ref(vpc) + '.id' : `"" # ${tt('unassociatedVpc')}`
     blocks.push(`resource "tencentcloud_route_table" "${ctx.name(rt)}" {
-  name   = "${rt.data.name}"
+  name   = "${clean(rt.data.name)}"
   vpc_id = ${vpcRef}
 }`)
     ;(rt.data.routes || []).forEach((route, i) => {

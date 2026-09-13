@@ -1,4 +1,4 @@
-import { createCloudContext, resolveNextHopNode, parsePortRange, resolveVpcRegion, instanceLoginAuth } from './common.js'
+import { createCloudContext, resolveNextHopNode, parsePortRange, resolveVpcRegion, resolveZone, instanceLoginAuth, collectKeyPairs, tlsKeyBlocks, clean } from './common.js'
 import { translate } from '../../i18n/index.js'
 
 const tt = (key) => translate(`export.${key}`)
@@ -20,6 +20,14 @@ const providerBlock = () => `terraform {
     aws = {
       source  = "hashicorp/aws"
       version = "~> 5.0"
+    }
+    tls = {
+      source  = "hashicorp/tls"
+      version = "~> 4.0"
+    }
+    local = {
+      source  = "hashicorp/local"
+      version = "~> 2.0"
     }
   }
 }
@@ -66,7 +74,7 @@ export function exportAwsTerraform(nodes, edges) {
   cidr_block = "${vpc.data.cidr}"
 
   tags = {
-    Name = "${vpc.data.name}"
+    Name = "${clean(vpc.data.name)}"
   }
 }`)
   }
@@ -77,10 +85,10 @@ export function exportAwsTerraform(nodes, edges) {
     blocks.push(`resource "aws_subnet" "${ctx.name(sub)}" {
   vpc_id            = ${vpcRef}
   cidr_block        = "${sub.data.cidr}"
-  availability_zone = "${sub.data.zone}"
+  availability_zone = "${resolveZone(sub.data.zone, vpc?.data.region || region, 'aws')}"
 
   tags = {
-    Name = "${sub.data.name}"
+    Name = "${clean(sub.data.name)}"
   }
 }`)
   }
@@ -89,11 +97,11 @@ export function exportAwsTerraform(nodes, edges) {
     const vpc = findVpc(sg)
     const vpcRef = vpc ? ref(vpc) + '.id' : `"" # ${tt('unassociatedVpc')}`
     blocks.push(`resource "aws_security_group" "${ctx.name(sg)}" {
-  name   = "${sg.data.name}"
+  name   = "${clean(sg.data.name)}"
   vpc_id = ${vpcRef}
 
   tags = {
-    Name = "${sg.data.name}"
+    Name = "${clean(sg.data.name)}"
   }
 }`)
     ;(sg.data.rules || []).forEach((rule, i) => {
@@ -116,7 +124,7 @@ export function exportAwsTerraform(nodes, edges) {
   for (const eip of eips) {
     blocks.push(`resource "aws_eip" "${ctx.name(eip)}" {
   tags = {
-    Name = "${eip.data.name}"
+    Name = "${clean(eip.data.name)}"
   }
 }`)
     ctx
@@ -142,9 +150,19 @@ export function exportAwsTerraform(nodes, edges) {
   subnet_id     = ${vswRef}
 
   tags = {
-    Name = "${gw.data.name}"
+    Name = "${clean(gw.data.name)}"
   }
 }`)
+  }
+
+  const keyPairs = collectKeyPairs(nodes)
+  for (const [keyName, resName] of keyPairs) {
+    blocks.push(`resource "aws_key_pair" "${resName}" {
+  key_name   = "${keyName}"
+  public_key = tls_private_key.${resName}.public_key_openssh
+}
+
+${tlsKeyBlocks(keyName, resName)}`)
   }
 
   for (const inst of nodes.filter((n) => n.type === 'Instance')) {
@@ -154,11 +172,15 @@ export function exportAwsTerraform(nodes, edges) {
     const sgRefs = sgs.map((s) => ref(s) + '.id')
     const sgLine = sgRefs.length ? `\n  vpc_security_group_ids   = [${sgRefs.join(', ')}]` : ''
     const auth = instanceLoginAuth(inst.data)
-    const authLine = auth.value
-      ? auth.type === 'password'
-        ? `\n  # ${tt('passwordUnsupported')}`
-        : `\n  key_name      = "${auth.value}"`
-      : ''
+    let authLine = ''
+    if (auth.value) {
+      if (auth.type === 'password') {
+        authLine = `\n  # ${tt('passwordUnsupported')}`
+      } else {
+        const resName = keyPairs.get(clean(auth.value))
+        authLine = `\n  key_name      = aws_key_pair.${resName}.key_name`
+      }
+    }
     const marketLine =
       inst.data.chargeType === 'spot'
         ? `\n\n  instance_market_options {\n    market_type = "spot"\n  }`
@@ -169,8 +191,12 @@ export function exportAwsTerraform(nodes, edges) {
   subnet_id     = ${vswRef}${sgLine}
   private_ip    = "${inst.data.privateIp}"${authLine}${marketLine}
 
+  root_block_device {
+    volume_size = 40
+  }
+
   tags = {
-    Name = "${inst.data.name}"
+    Name = "${clean(inst.data.name)}"
   }
 }`)
   }
@@ -182,7 +208,7 @@ export function exportAwsTerraform(nodes, edges) {
   vpc_id = ${vpcRef}
 
   tags = {
-    Name = "${rt.data.name}"
+    Name = "${clean(rt.data.name)}"
   }
 }`)
     ;(rt.data.routes || []).forEach((route, i) => {

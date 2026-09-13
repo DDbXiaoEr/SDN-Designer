@@ -10,6 +10,7 @@ import { canConnect } from './data/nodeDefinitions.js'
 import { createDesigner, nextId } from './store/designer.js'
 import { exportOvn } from './export/ovn.js'
 import { exportTerraform } from './export/terraform/index.js'
+import { validateZones } from './export/terraform/common.js'
 import { download } from './export/utils.js'
 import { serializeDesign, deserializeDesign } from './store/persistence.js'
 import { vendor } from './store/vendor.js'
@@ -147,6 +148,14 @@ function showOvn() {
 
 function showTerraform() {
   const files = exportTerraform(nodes.value, edges.value, vendor.value)
+  const warnings = validateZones(nodes.value, edges.value, vendor.value).map((issue) =>
+    t('export.zoneMismatch', {
+      subnet: issue.name,
+      zone: issue.zone,
+      region: issue.region,
+      expected: issue.expected,
+    })
+  )
   exportModal.value = {
     title: t('export.terraformTitle', { vendor: t(`vendors.${vendor.value}`) }),
     groups: files.map((f) => ({
@@ -155,6 +164,7 @@ function showTerraform() {
       content: f.content,
       filename: f.filename,
     })),
+    warnings,
   }
 }
 
@@ -206,6 +216,7 @@ const nodesCount = computed(() => nodes.value.length)
       v-if="exportModal"
       :title="exportModal.title"
       :groups="exportModal.groups"
+      :warnings="exportModal.warnings"
       @close="exportModal = null"
     />
 

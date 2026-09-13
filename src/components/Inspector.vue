@@ -6,15 +6,15 @@ import { nodeLabelKey } from '../data/vendors.js'
 import { vendor } from '../store/vendor.js'
 import { useDesigner } from '../store/designer.js'
 
-const { t } = useI18n()
+const { t, te } = useI18n()
 const { nodes, selectedId, updateNodeData, removeNode } = useDesigner()
 
 const node = computed(() => nodes.value.find((n) => n.id === selectedId.value))
 const def = computed(() => (node.value ? NODE_TYPES[node.value.type] : null))
 
-// 翻译 i18n key，字面量原样返回
+// 翻译 i18n key，非文案（如镜像 ID）原样返回
 function tl(s) {
-  return s && s.includes('.') ? t(s) : s
+  return s && te(s) ? t(s) : s
 }
 
 function patch(key, value) {
@@ -108,6 +108,16 @@ function nicPatch(i, key, value) {
         <select v-if="f.type === 'select'" :value="node.data[f.key]" @change="patch(f.key, $event.target.value)">
           <option v-for="o in optionsFor(f)" :key="o.value" :value="o.value">{{ tl(o.label) }}</option>
         </select>
+        <template v-else-if="f.type === 'combo'">
+          <input
+            :list="`combo-${node.id}-${f.key}`"
+            :value="node.data[f.key]"
+            @input="patch(f.key, $event.target.value)"
+          />
+          <datalist :id="`combo-${node.id}-${f.key}`">
+            <option v-for="o in optionsFor(f)" :key="o.value" :value="o.value">{{ tl(o.label) }}</option>
+          </datalist>
+        </template>
         <input
           v-else-if="f.type === 'checkbox'"
           type="checkbox"

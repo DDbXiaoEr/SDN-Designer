@@ -55,7 +55,9 @@ export function download(filename, text) {
 }
 
 export function slug(str) {
-  return String(str || '').replace(/[^a-zA-Z0-9_-]/g, '_')
+  return String(str || '')
+    .trim()
+    .replace(/[^a-zA-Z0-9_-]/g, '_')
 }
 
 // 计算区域（zone）：Host 节点通过隧道连线形成的连通分量
