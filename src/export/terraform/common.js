@@ -20,7 +20,7 @@ export function createCloudContext(nodes, edges, resourceTypes) {
       resourceNames.set(n.id, count === 1 ? base : `${base}_${count}`)
     }
   }
-  ;['VPC', 'Subnet', 'Instance', 'SecurityGroup', 'Gateway', 'RouteTable'].forEach(assignUniqueNames)
+  ;['VPC', 'Subnet', 'Instance', 'SecurityGroup', 'Gateway', 'Eip', 'RouteTable'].forEach(assignUniqueNames)
 
   const name = (node) => resourceNames.get(node.id)
 
@@ -30,11 +30,8 @@ export function createCloudContext(nodes, edges, resourceTypes) {
     if (type === 'VPC') return `${resourceTypes.vpc}.${name(node)}`
     if (type === 'Instance') return `${resourceTypes.instance}.${name(node)}`
     if (type === 'SecurityGroup') return `${resourceTypes.securityGroup}.${name(node)}`
-    if (type === 'Gateway') {
-      return node.data.kind === 'eip'
-        ? `${resourceTypes.eip}.${name(node)}`
-        : `${resourceTypes.natGateway}.${name(node)}`
-    }
+    if (type === 'Gateway') return `${resourceTypes.natGateway}.${name(node)}`
+    if (type === 'Eip') return `${resourceTypes.eip}.${name(node)}`
     if (type === 'RouteTable') return `${resourceTypes.routeTable}.${name(node)}`
     return null
   }
@@ -65,7 +62,7 @@ export function createCloudContext(nodes, edges, resourceTypes) {
 export function resolveNextHopNode(ctx, route, vpc) {
   if (route.nextHop) return null
   if (route.nextHopType === 'NatGateway') {
-    const gws = ctx.nodes.filter((n) => n.type === 'Gateway' && n.data.kind !== 'eip')
+    const gws = ctx.nodes.filter((n) => n.type === 'Gateway')
     return gws.find((g) => ctx.findVpc(g)?.id === vpc?.id) || gws[0] || null
   }
   if (route.nextHopType === 'Instance') {
@@ -73,6 +70,12 @@ export function resolveNextHopNode(ctx, route, vpc) {
     return insts.find((i) => ctx.findVpc(i)?.id === vpc?.id) || insts[0] || null
   }
   return null
+}
+
+// 将 [key, value] 列表格式化为键名对齐的 HCL 属性行
+export function hclLines(rows) {
+  const width = rows.reduce((max, [k]) => Math.max(max, k.length), 0)
+  return rows.map(([k, v]) => `  ${k.padEnd(width)} = ${v}`).join('\n')
 }
 
 // 实例登录认证：password 优先，否则使用密钥对

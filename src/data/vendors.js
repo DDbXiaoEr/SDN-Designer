@@ -28,6 +28,7 @@ const CLOUD_BADGES = {
   VPC: { aliyun: 'VPC', tencent: 'VPC', aws: 'VPC', huawei: 'VPC' },
   Subnet: { aliyun: 'VSW', tencent: 'Subnet', aws: 'Subnet', huawei: 'Subnet' },
   Gateway: { aliyun: 'GW', tencent: 'GW', aws: 'GW', huawei: 'GW' },
+  Eip: { aliyun: 'EIP', tencent: 'EIP', aws: 'EIP', huawei: 'EIP' },
   SecurityGroup: { aliyun: 'SG', tencent: 'SG', aws: 'SG', huawei: 'SG' },
   Instance: { aliyun: 'ECS', tencent: 'CVM', aws: 'EC2', huawei: 'ECS' },
   RouteTable: { aliyun: 'RT', tencent: 'RT', aws: 'RT', huawei: 'RT' },

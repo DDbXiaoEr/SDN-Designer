@@ -1,4 +1,4 @@
-import { createCloudContext, resolveNextHopNode, resolveVpcRegion, instanceLoginAuth } from './common.js'
+import { createCloudContext, resolveNextHopNode, resolveVpcRegion, instanceLoginAuth, hclLines } from './common.js'
 import { translate } from '../../i18n/index.js'
 
 const tt = (key) => translate(`export.${key}`)
@@ -15,7 +15,7 @@ const resourceTypes = {
   routeEntry: 'alicloud_route_entry',
 }
 
-const header = (region) => `terraform {
+const providerBlock = () => `terraform {
   required_providers {
     alicloud = {
       source  = "aliyun/alicloud"
@@ -25,19 +25,52 @@ const header = (region) => `terraform {
 }
 
 provider "alicloud" {
-  region = var.region
+  region     = var.region
+  access_key = var.access_key
+  secret_key = var.secret_key
 }
+`
 
-variable "region" {
+const variablesBlock = (region) => `variable "region" {
   type    = string
   default = "${region}"
 }
+
+variable "access_key" {
+  type        = string
+  description = "${tt('aliyunAccessKey')}"
+  sensitive   = true
+}
+
+variable "secret_key" {
+  type        = string
+  description = "${tt('aliyunSecretKey')}"
+  sensitive   = true
+}
 `
+
+function aliyunChargeRows(chargeType) {
+  if (chargeType === 'subscription') {
+    return [
+      ['instance_charge_type', '"PrePaid"'],
+      ['period_unit', '"Month"'],
+      ['period', '1'],
+    ]
+  }
+  if (chargeType === 'spot') {
+    return [
+      ['instance_charge_type', '"PostPaid"'],
+      ['spot_strategy', '"SpotAsPriceGo"'],
+    ]
+  }
+  return [['instance_charge_type', '"PostPaid"']]
+}
 
 export function exportAliyunTerraform(nodes, edges) {
   const ctx = createCloudContext(nodes, edges, resourceTypes)
   const { ref, findVpc, findSubnet } = ctx
-  const blocks = [header(resolveVpcRegion(nodes, 'cn-hangzhou'))]
+  const region = resolveVpcRegion(nodes, 'cn-hangzhou')
+  const blocks = []
 
   for (const vpc of nodes.filter((n) => n.type === 'VPC')) {
     blocks.push(`resource "alicloud_vpc" "${ctx.name(vpc)}" {
@@ -79,23 +112,34 @@ export function exportAliyunTerraform(nodes, edges) {
   }
 
   for (const gw of nodes.filter((n) => n.type === 'Gateway')) {
-    if (gw.data.kind === 'eip') {
-      blocks.push(`resource "alicloud_eip" "${ctx.name(gw)}" {
-  bandwidth            = "100"
-  internet_charge_type = "PayByTraffic"
-}`)
-    } else {
-      const sub = findSubnet(gw)
-      const vpc = findVpc(gw)
-      const vpcRef = vpc ? ref(vpc) + '.id' : '""'
-      const vswRef = sub ? ref(sub) + '.id' : '""'
-      blocks.push(`resource "alicloud_nat_gateway" "${ctx.name(gw)}" {
+    const sub = findSubnet(gw)
+    const vpc = findVpc(gw)
+    const vpcRef = vpc ? ref(vpc) + '.id' : '""'
+    const vswRef = sub ? ref(sub) + '.id' : '""'
+    blocks.push(`resource "alicloud_nat_gateway" "${ctx.name(gw)}" {
   vpc_id           = ${vpcRef}
   vswitch_id       = ${vswRef}
   nat_gateway_name = "${gw.data.name}"
   nat_type         = "Enhanced"
 }`)
-    }
+  }
+
+  for (const eip of nodes.filter((n) => n.type === 'Eip')) {
+    const internetChargeType =
+      eip.data.internetChargeType === 'payByBandwidth' ? 'PayByBandwidth' : 'PayByTraffic'
+    blocks.push(`resource "alicloud_eip" "${ctx.name(eip)}" {
+  bandwidth            = "${eip.data.bandwidth}"
+  internet_charge_type = "${internetChargeType}"
+}`)
+    ctx
+      .targetNodes(eip.id)
+      .filter((n) => n.type === 'Instance')
+      .forEach((inst, i) => {
+        blocks.push(`resource "alicloud_eip_association" "${ctx.name(eip)}_${i}" {
+  allocation_id = ${ref(eip)}.id
+  instance_id   = ${ref(inst)}.id
+}`)
+      })
   }
 
   for (const inst of nodes.filter((n) => n.type === 'Instance')) {
@@ -103,18 +147,20 @@ export function exportAliyunTerraform(nodes, edges) {
     const vswRef = sub ? ref(sub) + '.id' : `"" # ${tt('unassociatedVswitch')}`
     const sgs = ctx.targetNodes(inst.id).filter((n) => n.type === 'SecurityGroup')
     const sgRefs = sgs.map((s) => ref(s) + '.id')
-    const sgLine = sgRefs.length ? `\n  security_groups            = [${sgRefs.join(', ')}]` : ''
     const auth = instanceLoginAuth(inst.data)
-    const authLine = auth.value
-      ? `\n  ${auth.type === 'password' ? 'password' : 'key_name'}                   = "${auth.value}"`
-      : ''
+    const rows = [
+      ['instance_name', `"${inst.data.name}"`],
+      ['instance_type', `"${inst.data.instanceType}"`],
+      ['image_id', `"${inst.data.imageId}"`],
+      ...aliyunChargeRows(inst.data.chargeType),
+      ['vswitch_id', vswRef],
+      ['private_ip', `"${inst.data.privateIp}"`],
+      ['internet_max_bandwidth_out', '0'],
+    ]
+    if (sgRefs.length) rows.push(['security_groups', `[${sgRefs.join(', ')}]`])
+    if (auth.value) rows.push([auth.type === 'password' ? 'password' : 'key_name', `"${auth.value}"`])
     blocks.push(`resource "alicloud_instance" "${ctx.name(inst)}" {
-  instance_name              = "${inst.data.name}"
-  instance_type              = "${inst.data.instanceType}"
-  image_id                   = "${inst.data.imageId}"
-  vswitch_id                 = ${vswRef}${sgLine}
-  private_ip                 = "${inst.data.privateIp}"${authLine}
-  internet_max_bandwidth_out = 0
+${hclLines(rows)}
 }`)
   }
 
@@ -141,5 +187,9 @@ export function exportAliyunTerraform(nodes, edges) {
     })
   }
 
-  return blocks.join('\n\n') + '\n'
+  return {
+    provider: providerBlock(),
+    variables: variablesBlock(region),
+    main: blocks.join('\n\n') + '\n',
+  }
 }

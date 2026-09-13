@@ -146,11 +146,15 @@ function showOvn() {
 }
 
 function showTerraform() {
+  const files = exportTerraform(nodes.value, edges.value, vendor.value)
   exportModal.value = {
     title: t('export.terraformTitle', { vendor: t(`vendors.${vendor.value}`) }),
-    groups: [
-      { id: 'main', label: '', content: exportTerraform(nodes.value, edges.value, vendor.value), filename: 'main.tf' },
-    ],
+    groups: files.map((f) => ({
+      id: f.id,
+      label: f.filename,
+      content: f.content,
+      filename: f.filename,
+    })),
   }
 }
 
@@ -176,6 +180,7 @@ const nodesCount = computed(() => nodes.value.length)
           :snap-grid="[16, 16]"
           :default-edge-options="{
             animated: false,
+            interactionWidth: 26,
             style: { stroke: '#4f8cff', strokeWidth: 2 },
             labelStyle: { fill: '#e6e8ee', fontSize: 11, fontWeight: 600 },
             labelBgStyle: { fill: '#1e222b' },
@@ -244,6 +249,16 @@ const nodesCount = computed(() => nodes.value.length)
 }
 :deep(.vue-flow__edge) {
   cursor: pointer;
+}
+:deep(.vue-flow__edge-interaction) {
+  stroke-width: 26px;
+}
+:deep(.vue-flow__edge:hover .vue-flow__edge-path) {
+  stroke: var(--danger) !important;
+  stroke-width: 3 !important;
+}
+:deep(.vue-flow__edge:hover .vue-flow__edge-text) {
+  fill: var(--danger);
 }
 :deep(.vue-flow__edge-text) {
   font-weight: 600;

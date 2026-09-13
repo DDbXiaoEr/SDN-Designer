@@ -3,17 +3,20 @@ import { exportAwsTerraform } from './aws.js'
 import { exportTencentTerraform } from './tencent.js'
 import { exportHuaweiTerraform } from './huawei.js'
 
-// 按厂商分发 Terraform 导出
+const exporters = {
+  aws: exportAwsTerraform,
+  tencent: exportTencentTerraform,
+  huawei: exportHuaweiTerraform,
+  aliyun: exportAliyunTerraform,
+}
+
+// 按厂商分发 Terraform 导出，拆分为 provider / variables / main 三个文件
 export function exportTerraform(nodes, edges, vendor) {
-  switch (vendor) {
-    case 'aws':
-      return exportAwsTerraform(nodes, edges)
-    case 'tencent':
-      return exportTencentTerraform(nodes, edges)
-    case 'huawei':
-      return exportHuaweiTerraform(nodes, edges)
-    case 'aliyun':
-    default:
-      return exportAliyunTerraform(nodes, edges)
-  }
+  const exporter = exporters[vendor] || exportAliyunTerraform
+  const { provider, variables, main } = exporter(nodes, edges)
+  return [
+    { id: 'provider', filename: 'provider.tf', content: provider },
+    { id: 'variables', filename: 'variables.tf', content: variables },
+    { id: 'main', filename: 'main.tf', content: main },
+  ]
 }

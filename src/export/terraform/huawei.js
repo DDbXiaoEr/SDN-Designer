@@ -1,4 +1,4 @@
-import { createCloudContext, resolveNextHopNode, parsePortRange, resolveVpcRegion, instanceLoginAuth } from './common.js'
+import { createCloudContext, resolveNextHopNode, parsePortRange, resolveVpcRegion, instanceLoginAuth, hclLines } from './common.js'
 import { translate } from '../../i18n/index.js'
 
 const tt = (key) => translate(`export.${key}`)
@@ -15,7 +15,7 @@ const resourceTypes = {
   routeEntry: 'huaweicloud_vpc_route',
 }
 
-const header = (region) => `terraform {
+const providerBlock = () => `terraform {
   required_providers {
     huaweicloud = {
       source  = "huaweicloud/huaweicloud"
@@ -25,12 +25,27 @@ const header = (region) => `terraform {
 }
 
 provider "huaweicloud" {
-  region = var.region
+  region     = var.region
+  access_key = var.access_key
+  secret_key = var.secret_key
 }
+`
 
-variable "region" {
+const variablesBlock = (region) => `variable "region" {
   type    = string
   default = "${region}"
+}
+
+variable "access_key" {
+  type        = string
+  description = "${tt('huaweiAccessKey')}"
+  sensitive   = true
+}
+
+variable "secret_key" {
+  type        = string
+  description = "${tt('huaweiSecretKey')}"
+  sensitive   = true
 }
 `
 
@@ -39,10 +54,28 @@ function hwProtocol(protocol) {
   return protocol
 }
 
+function huaweiChargeRows(chargeType) {
+  if (chargeType === 'subscription') {
+    return [
+      ['charging_mode', '"prePaid"'],
+      ['period_unit', '"month"'],
+      ['period', '1'],
+    ]
+  }
+  if (chargeType === 'spot') {
+    return [
+      ['charging_mode', '"spot"'],
+      ['spot_maximum_price', '"0.5"'],
+    ]
+  }
+  return [['charging_mode', '"postPaid"']]
+}
+
 export function exportHuaweiTerraform(nodes, edges) {
   const ctx = createCloudContext(nodes, edges, resourceTypes)
   const { ref, findVpc, findSubnet } = ctx
-  const blocks = [header(resolveVpcRegion(nodes, 'cn-north-4'))]
+  const region = resolveVpcRegion(nodes, 'cn-north-4')
+  const blocks = []
 
   for (const vpc of nodes.filter((n) => n.type === 'VPC')) {
     blocks.push(`resource "huaweicloud_vpc" "${ctx.name(vpc)}" {
@@ -82,17 +115,31 @@ export function exportHuaweiTerraform(nodes, edges) {
     })
   }
 
-  const eips = nodes.filter((n) => n.type === 'Gateway' && n.data.kind === 'eip')
-  for (const eip of eips) {
+  for (const eip of nodes.filter((n) => n.type === 'Eip')) {
+    const chargeMode = eip.data.internetChargeType === 'payByBandwidth' ? 'bandwidth' : 'traffic'
     blocks.push(`resource "huaweicloud_vpc_eip" "${ctx.name(eip)}" {
+  publicip {
+    type = "5_bgp"
+  }
   bandwidth {
-    share_type = "PER"
-    size       = 100
+    name        = "${eip.data.name}"
+    share_type  = "PER"
+    size        = ${Number(eip.data.bandwidth) || 5}
+    charge_mode = "${chargeMode}"
   }
 }`)
+    ctx
+      .targetNodes(eip.id)
+      .filter((n) => n.type === 'Instance')
+      .forEach((inst, i) => {
+        blocks.push(`resource "huaweicloud_compute_eip_associate" "${ctx.name(eip)}_${i}" {
+  public_ip   = ${ref(eip)}.address
+  instance_id = ${ref(inst)}.id
+}`)
+      })
   }
 
-  for (const gw of nodes.filter((n) => n.type === 'Gateway' && n.data.kind !== 'eip')) {
+  for (const gw of nodes.filter((n) => n.type === 'Gateway')) {
     const sub = findSubnet(gw)
     const vpc = findVpc(gw)
     const vpcRef = vpc ? ref(vpc) + '.id' : `"" # ${tt('unassociatedVpc')}`
@@ -110,20 +157,28 @@ export function exportHuaweiTerraform(nodes, edges) {
     const subRef = sub ? ref(sub) + '.id' : `"" # ${tt('unassociatedVswitch')}`
     const sgs = ctx.targetNodes(inst.id).filter((n) => n.type === 'SecurityGroup')
     const sgNames = sgs.map((s) => `"${s.data.name}"`)
-    const sgLine = sgNames.length ? `\n  security_groups = [${sgNames.join(', ')}]` : ''
     const auth = instanceLoginAuth(inst.data)
-    const authLine = auth.value
-      ? `\n  ${auth.type === 'password' ? 'admin_pass' : 'key_pair'} = "${auth.value}"`
-      : ''
+    const rows = [
+      ['name', `"${inst.data.name}"`],
+      ['image_id', `"${inst.data.imageId}"`],
+      ['flavor_id', `"${inst.data.instanceType}"`],
+      ...huaweiChargeRows(inst.data.chargeType),
+    ]
+    if (auth.value) {
+      rows.push(
+        auth.type === 'password'
+          ? ['admin_pass', `"${auth.value}"`]
+          : ['key_pair', `"${auth.value}"`]
+      )
+    }
+    if (sgNames.length) rows.push(['security_groups', `[${sgNames.join(', ')}]`])
     blocks.push(`resource "huaweicloud_compute_instance" "${ctx.name(inst)}" {
-  name      = "${inst.data.name}"
-  image_id  = "${inst.data.imageId}"
-  flavor_id = "${inst.data.instanceType}"${authLine}
+${hclLines(rows)}
 
   network {
     uuid        = ${subRef}
     fixed_ip_v4 = "${inst.data.privateIp}"
-  }${sgLine}
+  }
 }`)
   }
 
@@ -160,5 +215,9 @@ export function exportHuaweiTerraform(nodes, edges) {
     })
   }
 
-  return blocks.join('\n\n') + '\n'
+  return {
+    provider: providerBlock(),
+    variables: variablesBlock(region),
+    main: blocks.join('\n\n') + '\n',
+  }
 }

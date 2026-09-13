@@ -23,7 +23,8 @@ OVN-Designer/
     ├── data/
     │   ├── nodeDefinitions.js # 节点类型元数据（唯一数据源）
     │   ├── vendors.js         # 云厂商列表 + 资源名/徽标按厂商解析
-    │   └── regions.js         # 各云厂商地域列表与默认地域
+    │   ├── regions.js         # 各云厂商地域列表与默认地域
+    │   └── chargeTypes.js     # 各云厂商实例计费方式（包年包月/按量付费/抢占式）
     ├── store/
     │   ├── designer.js        # 状态管理（provide/inject 封装 useVueFlow）
     │   └── vendor.js          # 当前云厂商（ref，持久化到 localStorage）
@@ -71,9 +72,10 @@ OVN-Designer/
 | VM              | ovn     | `name`, `ip`, `mac`                                |
 | VPC             | cloud   | `name`, `cidr`, `region`                           |
 | Subnet          | cloud   | `name`, `cidr`, `zone`                             |
-| Gateway         | cloud   | `name`, `kind` (nat/eip)                           |
+| Gateway         | cloud   | `name`（NAT 网关）                                 |
+| Eip             | cloud   | `name`, `bandwidth`, `internetChargeType`(payByTraffic/payByBandwidth) |
 | SecurityGroup   | cloud   | `name`, `rules[]`                                  |
-| Instance        | cloud   | `name`, `imageId`, `instanceType`, `privateIp`, `loginType`(keyPair/password), `keyPair`, `password` |
+| Instance        | cloud   | `name`, `imageId`, `instanceType`, `chargeType`(subscription/payAsYouGo/spot), `privateIp`, `loginType`(keyPair/password), `keyPair`, `password` |
 | RouteTable      | cloud   | `name`, `routes[]`                                 |
 
 ### 连线（Edge）
@@ -88,6 +90,8 @@ OVN-Designer/
   删除 Cluster 节点会解散分组（移除内部隧道连线并还原 Host 绝对位置）。
 - `NODE_TYPES` 中 `handles: { source, target }` 控制节点左右两侧的连接点数量（Host 默认 4/4，其余 2/2）；
   `hidden: true` 的节点类型不会出现在左侧节点库。
+- 点击连线即删除：`App.vue` 的 `onEdgeClick` → `removeEdge`（Host↔Host 隧道连线删除后重算集群）；
+  连线通过 `interactionWidth` 与 CSS 扩大可点击热区，悬停时高亮为警示色作为反馈。
 
 ### 云厂商（vendor）
 
@@ -96,6 +100,10 @@ OVN-Designer/
   i18n 中 `nodes.vpc` / `nodes.subnet` / `nodes.instance` 等为按厂商分组的对象。
 - Terraform 导出按厂商分发（`export/terraform/index.js`）；OVN 导出与厂商无关。
 - VPC 的「地域」按当前厂商从 `regions.js` 下拉选择；Terraform 导出的 provider 默认地域取自首个 VPC 的 `region`。
+- Instance 的「计费方式」按当前厂商从 `chargeTypes.js` 下拉选择（包年包月/按量付费/抢占式）；
+  导出时映射为各厂商字段（如阿里云 `instance_charge_type` + `spot_strategy`，腾讯云 `instance_charge_type`，华为云 `charging_mode`，AWS `instance_market_options`）。
+- 独立 `Eip` 节点表示公网 IP；`Eip → Instance` 连线表示绑定到该实例，导出为厂商绑定资源
+  （`alicloud_eip_association` / `tencentcloud_eip_association` / `huaweicloud_compute_eip_associate` / `aws_eip_association`）。
 
 ### OVN 导出（按执行节点拆分）
 

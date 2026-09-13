@@ -25,6 +25,10 @@ async function copy() {
     /* 剪贴板不可用时忽略 */
   }
 }
+
+function downloadAll() {
+  props.groups.forEach((g) => download(g.filename, g.content))
+}
 </script>
 
 <template>
@@ -38,6 +42,7 @@ async function copy() {
           </select>
           <button @click="copy">{{ copied ? t('common.copied') : t('common.copy') }}</button>
           <button @click="download(selected.filename, selected.content)">{{ t('common.download') }}</button>
+          <button v-if="hasSelector" @click="downloadAll">{{ t('common.downloadAll') }}</button>
           <button class="close" @click="emit('close')">{{ t('common.close') }}</button>
         </div>
       </div>

@@ -15,7 +15,7 @@ const resourceTypes = {
   routeEntry: 'aws_route',
 }
 
-const header = (region) => `terraform {
+const providerBlock = () => `terraform {
   required_providers {
     aws = {
       source  = "hashicorp/aws"
@@ -25,12 +25,27 @@ const header = (region) => `terraform {
 }
 
 provider "aws" {
-  region = var.region
+  region     = var.region
+  access_key = var.access_key
+  secret_key = var.secret_key
 }
+`
 
-variable "region" {
+const variablesBlock = (region) => `variable "region" {
   type    = string
   default = "${region}"
+}
+
+variable "access_key" {
+  type        = string
+  description = "${tt('awsAccessKey')}"
+  sensitive   = true
+}
+
+variable "secret_key" {
+  type        = string
+  description = "${tt('awsSecretKey')}"
+  sensitive   = true
 }
 `
 
@@ -43,7 +58,8 @@ function awsProtocol(protocol) {
 export function exportAwsTerraform(nodes, edges) {
   const ctx = createCloudContext(nodes, edges, resourceTypes)
   const { ref, findVpc, findSubnet } = ctx
-  const blocks = [header(resolveVpcRegion(nodes, 'us-east-1'))]
+  const region = resolveVpcRegion(nodes, 'us-east-1')
+  const blocks = []
 
   for (const vpc of nodes.filter((n) => n.type === 'VPC')) {
     blocks.push(`resource "aws_vpc" "${ctx.name(vpc)}" {
@@ -96,21 +112,30 @@ export function exportAwsTerraform(nodes, edges) {
     })
   }
 
-  const eips = nodes.filter((n) => n.type === 'Gateway' && n.data.kind === 'eip')
+  const eips = nodes.filter((n) => n.type === 'Eip')
   for (const eip of eips) {
     blocks.push(`resource "aws_eip" "${ctx.name(eip)}" {
   tags = {
     Name = "${eip.data.name}"
   }
 }`)
+    ctx
+      .targetNodes(eip.id)
+      .filter((n) => n.type === 'Instance')
+      .forEach((inst, i) => {
+        blocks.push(`resource "aws_eip_association" "${ctx.name(eip)}_${i}" {
+  allocation_id = ${ref(eip)}.id
+  instance_id   = ${ref(inst)}.id
+}`)
+      })
   }
 
-  for (const gw of nodes.filter((n) => n.type === 'Gateway' && n.data.kind !== 'eip')) {
+  for (const gw of nodes.filter((n) => n.type === 'Gateway')) {
     const sub = findSubnet(gw)
     const vpc = findVpc(gw)
     const vswRef = sub ? ref(sub) + '.id' : `"" # ${tt('unassociatedVswitch')}`
-    const eipNode =
-      eips.find((e) => findVpc(e)?.id === vpc?.id) || eips[0]
+    const freeEips = eips.filter((e) => !ctx.targetNodes(e.id).some((n) => n.type === 'Instance'))
+    const eipNode = freeEips[0] || eips[0]
     const allocRef = eipNode ? ref(eipNode) + '.id' : `"" # TODO: ${tt('fillNextHop')}`
     blocks.push(`resource "aws_nat_gateway" "${ctx.name(gw)}" {
   allocation_id = ${allocRef}
@@ -134,11 +159,15 @@ export function exportAwsTerraform(nodes, edges) {
         ? `\n  # ${tt('passwordUnsupported')}`
         : `\n  key_name      = "${auth.value}"`
       : ''
+    const marketLine =
+      inst.data.chargeType === 'spot'
+        ? `\n\n  instance_market_options {\n    market_type = "spot"\n  }`
+        : ''
     blocks.push(`resource "aws_instance" "${ctx.name(inst)}" {
   ami           = "${inst.data.imageId}"
   instance_type = "${inst.data.instanceType}"
   subnet_id     = ${vswRef}${sgLine}
-  private_ip    = "${inst.data.privateIp}"${authLine}
+  private_ip    = "${inst.data.privateIp}"${authLine}${marketLine}
 
   tags = {
     Name = "${inst.data.name}"
@@ -176,5 +205,9 @@ ${hopLine}
     })
   }
 
-  return blocks.join('\n\n') + '\n'
+  return {
+    provider: providerBlock(),
+    variables: variablesBlock(region),
+    main: blocks.join('\n\n') + '\n',
+  }
 }

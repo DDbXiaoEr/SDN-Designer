@@ -2,6 +2,7 @@
 // label / summary 键为 i18n key，组件中通过 t() 翻译
 
 import { defaultRegion, regionOptions } from './regions.js'
+import { chargeTypeOptions, defaultChargeType } from './chargeTypes.js'
 
 export const CATEGORIES = {
   ovn: { label: 'categories.ovn', color: 'var(--ovn)' },
@@ -150,21 +151,36 @@ export const NODE_TYPES = {
     badge: 'GW',
     defaults: () => ({
       name: 'nat1',
-      kind: 'nat',
+    }),
+    fields: [{ key: 'name', label: 'fields.name', type: 'text' }],
+    summary: () => [['summary.type', 'NAT']],
+  },
+  Eip: {
+    category: 'cloud',
+    label: 'nodes.eip',
+    badge: 'EIP',
+    defaults: () => ({
+      name: 'eip1',
+      bandwidth: 5,
+      internetChargeType: 'payByTraffic',
     }),
     fields: [
       { key: 'name', label: 'fields.name', type: 'text' },
+      { key: 'bandwidth', label: 'fields.bandwidth', type: 'text' },
       {
-        key: 'kind',
-        label: 'fields.type',
+        key: 'internetChargeType',
+        label: 'fields.internetChargeType',
         type: 'select',
         options: [
-          { value: 'nat', label: 'fields.gatewayNat' },
-          { value: 'eip', label: 'fields.gatewayEip' },
+          { value: 'payByTraffic', label: 'internetChargeTypes.traffic' },
+          { value: 'payByBandwidth', label: 'internetChargeTypes.bandwidth' },
         ],
       },
     ],
-    summary: (d) => [['summary.type', d.kind === 'eip' ? 'EIP' : 'NAT']],
+    summary: (d) => [
+      ['summary.bandwidth', `${d.bandwidth} Mbps`],
+      ['summary.charge', d.internetChargeType === 'payByBandwidth' ? 'PayByBandwidth' : 'PayByTraffic'],
+    ],
   },
   SecurityGroup: {
     category: 'cloud',
@@ -187,6 +203,7 @@ export const NODE_TYPES = {
       name: 'ecs1',
       imageId: 'ubuntu_22_04_x64_20G_alibase_20240101.vhd',
       instanceType: 'ecs.t5-lc1m2.small',
+      chargeType: defaultChargeType(),
       privateIp: '10.0.1.10',
       loginType: 'keyPair',
       keyPair: '',
@@ -196,6 +213,12 @@ export const NODE_TYPES = {
       { key: 'name', label: 'fields.name', type: 'text' },
       { key: 'imageId', label: 'fields.imageId', type: 'text' },
       { key: 'instanceType', label: 'fields.instanceType', type: 'text' },
+      {
+        key: 'chargeType',
+        label: 'fields.chargeType',
+        type: 'select',
+        options: (vendor) => chargeTypeOptions(vendor),
+      },
       { key: 'privateIp', label: 'fields.privateIp', type: 'text' },
       {
         key: 'loginType',
@@ -238,6 +261,7 @@ export const CONNECTION_RULES = [
   { source: 'VPC', target: 'Subnet', label: 'connections.vpcToSubnet' },
   { source: 'Subnet', target: 'Instance', label: 'connections.subnetToInstance' },
   { source: 'Instance', target: 'SecurityGroup', label: 'connections.instanceToSg' },
+  { source: 'Eip', target: 'Instance', label: 'connections.eipToInstance' },
   { source: 'Subnet', target: 'Gateway', label: 'connections.subnetToGateway' },
   { source: 'Subnet', target: 'RouteTable', label: 'connections.subnetToRouteTable' },
   { source: 'VPC', target: 'RouteTable', label: 'connections.subnetToRouteTable' },

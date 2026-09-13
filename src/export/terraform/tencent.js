@@ -1,4 +1,4 @@
-import { createCloudContext, resolveNextHopNode, resolveVpcRegion, instanceLoginAuth } from './common.js'
+import { createCloudContext, resolveNextHopNode, resolveVpcRegion, instanceLoginAuth, hclLines } from './common.js'
 import { translate } from '../../i18n/index.js'
 
 const tt = (key) => translate(`export.${key}`)
@@ -15,7 +15,7 @@ const resourceTypes = {
   routeEntry: 'tencentcloud_route_entry',
 }
 
-const header = (region) => `terraform {
+const providerBlock = () => `terraform {
   required_providers {
     tencentcloud = {
       source  = "tencentcloudstack/tencentcloud"
@@ -25,12 +25,27 @@ const header = (region) => `terraform {
 }
 
 provider "tencentcloud" {
-  region = var.region
+  region     = var.region
+  secret_id  = var.secret_id
+  secret_key = var.secret_key
 }
+`
 
-variable "region" {
+const variablesBlock = (region) => `variable "region" {
   type    = string
   default = "${region}"
+}
+
+variable "secret_id" {
+  type        = string
+  description = "${tt('tencentSecretId')}"
+  sensitive   = true
+}
+
+variable "secret_key" {
+  type        = string
+  description = "${tt('tencentSecretKey')}"
+  sensitive   = true
 }
 `
 
@@ -40,10 +55,28 @@ function tcProtocol(protocol) {
   return protocol.toUpperCase()
 }
 
+function tencentChargeRows(chargeType) {
+  if (chargeType === 'subscription') {
+    return [
+      ['instance_charge_type', '"PREPAID"'],
+      ['instance_charge_type_prepaid_period', '1'],
+    ]
+  }
+  if (chargeType === 'spot') {
+    return [
+      ['instance_charge_type', '"SPOTPAID"'],
+      ['spot_instance_type', '"ONE-TIME"'],
+      ['spot_max_price', '"0.50"'],
+    ]
+  }
+  return [['instance_charge_type', '"POSTPAID_BY_HOUR"']]
+}
+
 export function exportTencentTerraform(nodes, edges) {
   const ctx = createCloudContext(nodes, edges, resourceTypes)
   const { ref, findVpc, findSubnet } = ctx
-  const blocks = [header(resolveVpcRegion(nodes, 'ap-guangzhou'))]
+  const region = resolveVpcRegion(nodes, 'ap-guangzhou')
+  const blocks = []
 
   for (const vpc of nodes.filter((n) => n.type === 'VPC')) {
     blocks.push(`resource "tencentcloud_vpc" "${ctx.name(vpc)}" {
@@ -81,14 +114,28 @@ export function exportTencentTerraform(nodes, edges) {
     })
   }
 
-  const eips = nodes.filter((n) => n.type === 'Gateway' && n.data.kind === 'eip')
-  for (const eip of eips) {
+  for (const eip of nodes.filter((n) => n.type === 'Eip')) {
+    const internetChargeType =
+      eip.data.internetChargeType === 'payByBandwidth'
+        ? 'BANDWIDTH_POSTPAID_BY_HOUR'
+        : 'TRAFFIC_POSTPAID_BY_HOUR'
     blocks.push(`resource "tencentcloud_eip" "${ctx.name(eip)}" {
-  name = "${eip.data.name}"
+  name                       = "${eip.data.name}"
+  internet_charge_type       = "${internetChargeType}"
+  internet_max_bandwidth_out = ${Number(eip.data.bandwidth) || 5}
 }`)
+    ctx
+      .targetNodes(eip.id)
+      .filter((n) => n.type === 'Instance')
+      .forEach((inst, i) => {
+        blocks.push(`resource "tencentcloud_eip_association" "${ctx.name(eip)}_${i}" {
+  eip_id      = ${ref(eip)}.id
+  instance_id = ${ref(inst)}.id
+}`)
+      })
   }
 
-  for (const gw of nodes.filter((n) => n.type === 'Gateway' && n.data.kind !== 'eip')) {
+  for (const gw of nodes.filter((n) => n.type === 'Gateway')) {
     const vpc = findVpc(gw)
     const vpcRef = vpc ? ref(vpc) + '.id' : `"" # ${tt('unassociatedVpc')}`
     blocks.push(`resource "tencentcloud_nat_gateway" "${ctx.name(gw)}" {
@@ -106,20 +153,26 @@ export function exportTencentTerraform(nodes, edges) {
     const subRef = sub ? ref(sub) + '.id' : `"" # ${tt('unassociatedVswitch')}`
     const sgs = ctx.targetNodes(inst.id).filter((n) => n.type === 'SecurityGroup')
     const sgRefs = sgs.map((s) => ref(s) + '.id')
-    const sgLine = sgRefs.length ? `\n  security_groups = [${sgRefs.join(', ')}]` : ''
     const auth = instanceLoginAuth(inst.data)
-    const authLine = auth.value
-      ? auth.type === 'password'
-        ? `\n  password      = "${auth.value}"`
-        : `\n  key_ids       = ["${auth.value}"]`
-      : ''
+    const rows = [
+      ['instance_name', `"${inst.data.name}"`],
+      ['image_id', `"${inst.data.imageId}"`],
+      ['instance_type', `"${inst.data.instanceType}"`],
+      ...tencentChargeRows(inst.data.chargeType),
+      ['vpc_id', vpcRef],
+      ['subnet_id', subRef],
+      ['private_ip', `"${inst.data.privateIp}"`],
+    ]
+    if (sgRefs.length) rows.push(['security_groups', `[${sgRefs.join(', ')}]`])
+    if (auth.value) {
+      rows.push(
+        auth.type === 'password'
+          ? ['password', `"${auth.value}"`]
+          : ['key_ids', `["${auth.value}"]`]
+      )
+    }
     blocks.push(`resource "tencentcloud_instance" "${ctx.name(inst)}" {
-  instance_name = "${inst.data.name}"
-  image_id      = "${inst.data.imageId}"
-  instance_type = "${inst.data.instanceType}"
-  vpc_id        = ${vpcRef}
-  subnet_id     = ${subRef}
-  private_ip    = "${inst.data.privateIp}"${authLine}${sgLine}
+${hclLines(rows)}
 }`)
   }
 
@@ -156,5 +209,9 @@ export function exportTencentTerraform(nodes, edges) {
     })
   }
 
-  return blocks.join('\n\n') + '\n'
+  return {
+    provider: providerBlock(),
+    variables: variablesBlock(region),
+    main: blocks.join('\n\n') + '\n',
+  }
 }
