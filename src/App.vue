@@ -7,12 +7,13 @@ import { Controls } from '@vue-flow/controls'
 import { MiniMap } from '@vue-flow/minimap'
 import { nodeTypes } from './nodes/index.js'
 import { canConnect } from './data/nodeDefinitions.js'
+import { createDemoDesign } from './data/demo.js'
 import { createDesigner, nextId } from './store/designer.js'
 import { exportOvn } from './export/ovn.js'
 import { exportTerraform } from './export/terraform/index.js'
 import { validateZones } from './export/terraform/common.js'
 import { download } from './export/utils.js'
-import { serializeDesign, deserializeDesign } from './store/persistence.js'
+import { serializeDesign, deserializeDesign, loadFromStorage } from './store/persistence.js'
 import { vendor } from './store/vendor.js'
 import Palette from './components/Palette.vue'
 import Toolbar from './components/Toolbar.vue'
@@ -37,6 +38,29 @@ const editorOpen = ref(false)
 const editorNodeId = ref(null)
 const pendingDropPosition = ref(null)
 const fileInput = ref(null)
+
+// 载入内置示例拓扑；边标签按当前语言从连接规则解析
+function applyDemo() {
+  const { nodes: demoNodes, edges: demoEdges } = createDemoDesign()
+  const withLabels = demoEdges.map((e) => {
+    const source = demoNodes.find((n) => n.id === e.source)
+    const target = demoNodes.find((n) => n.id === e.target)
+    const rule = source && target ? canConnect(source.type, target.type) : null
+    return { ...e, type: 'default', label: rule ? t(rule.label) : '' }
+  })
+  vf.setNodes(demoNodes)
+  vf.setEdges(withLabels)
+  selectedId.value = null
+}
+
+// 工具栏按钮：画布非空时先确认，避免覆盖现有设计
+function onLoadDemo() {
+  if (nodes.value.length && !window.confirm(t('toolbar.loadDemoConfirm'))) return
+  applyDemo()
+}
+
+// 首次访问（从未保存过设计）时展示示例；用户清空后的空设计不会再次触发
+if (!loadFromStorage()) applyDemo()
 
 function onDragOver(e) {
   e.preventDefault()
@@ -216,6 +240,7 @@ const nodesCount = computed(() => nodes.value.length)
       @clear="clear"
       @save-design="saveDesign"
       @import-design="triggerImport"
+      @load-demo="onLoadDemo"
     />
     <div class="main">
       <Palette />

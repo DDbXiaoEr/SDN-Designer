@@ -31,6 +31,7 @@ const CLOUD_BADGES = {
   Eip: { aliyun: 'EIP', tencent: 'EIP', aws: 'EIP', huawei: 'EIP' },
   SecurityGroup: { aliyun: 'SG', tencent: 'SG', aws: 'SG', huawei: 'SG' },
   Instance: { aliyun: 'ECS', tencent: 'CVM', aws: 'EC2', huawei: 'ECS' },
+  KeyPair: { aliyun: 'KEY', tencent: 'KEY', aws: 'KEY', huawei: 'KEY' },
   RouteTable: { aliyun: 'RT', tencent: 'RT', aws: 'RT', huawei: 'RT' },
   Interconnect: { aliyun: 'PEER', tencent: 'PEER', aws: 'PEER', huawei: 'PEER' },
 }

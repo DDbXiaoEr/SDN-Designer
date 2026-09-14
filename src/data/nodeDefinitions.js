@@ -269,6 +269,31 @@ export const NODE_TYPES = {
     fields: [{ key: 'name', label: 'fields.name', type: 'text' }],
     summary: () => [['summary.type', 'VPC Peering']],
   },
+  KeyPair: {
+    category: 'cloud',
+    label: 'nodes.keyPair',
+    badge: 'KEY',
+    // 一个密钥对可绑定多个实例，target 连接点留足
+    handles: { source: 2, target: 4 },
+    defaults: () => ({
+      name: 'key1',
+      // create：由 Terraform 新建；existing：关联云上已有密钥对
+      mode: 'create',
+    }),
+    fields: [
+      { key: 'name', label: 'fields.name', type: 'text' },
+      {
+        key: 'mode',
+        label: 'fields.keyPairMode',
+        type: 'select',
+        options: [
+          { value: 'create', label: 'keyPairModes.create' },
+          { value: 'existing', label: 'keyPairModes.existing' },
+        ],
+      },
+    ],
+    summary: (d) => [['summary.keyPairMode', d.mode === 'existing' ? 'existing' : 'create']],
+  },
 }
 
 // 连接规则：source 类型 -> target 类型，带关系标签（i18n key）
@@ -282,6 +307,7 @@ export const CONNECTION_RULES = [
   { source: 'VPC', target: 'Subnet', label: 'connections.vpcToSubnet' },
   { source: 'Subnet', target: 'Instance', label: 'connections.subnetToInstance' },
   { source: 'Instance', target: 'SecurityGroup', label: 'connections.instanceToSg' },
+  { source: 'Instance', target: 'KeyPair', label: 'connections.instanceToKeyPair' },
   { source: 'Eip', target: 'Instance', label: 'connections.eipToInstance' },
   { source: 'Subnet', target: 'Gateway', label: 'connections.subnetToGateway' },
   { source: 'Subnet', target: 'RouteTable', label: 'connections.subnetToRouteTable' },

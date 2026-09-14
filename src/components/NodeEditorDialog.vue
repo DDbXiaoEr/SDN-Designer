@@ -14,10 +14,27 @@ const props = defineProps({
 
 const emit = defineEmits(['close'])
 const { t, te } = useI18n()
-const { nodes, updateNodeData } = useDesigner()
+const { nodes, edges, updateNodeData } = useDesigner()
 
 const node = computed(() => nodes.value.find((n) => n.id === props.nodeId))
 const def = computed(() => (node.value ? NODE_TYPES[node.value.type] : null))
+
+// 实例是否已连接 KeyPair 节点（Instance -> KeyPair）；连接后登录密钥对由该节点提供
+const hasKeyPairNode = computed(() => {
+  if (!node.value || node.value.type !== 'Instance') return false
+  return edges.value.some((e) => {
+    if (e.source !== node.value.id) return false
+    const target = nodes.value.find((n) => n.id === e.target)
+    return target && target.type === 'KeyPair'
+  })
+})
+
+function isFieldVisible(f) {
+  if (f.when && !f.when(node.value.data)) return false
+  // 已连接 KeyPair 节点时隐藏内联「登录密钥对」字段，避免与节点冲突
+  if (f.key === 'keyPair' && hasKeyPairNode.value) return false
+  return true
+}
 
 function tl(s) {
   return s && te(s) ? t(s) : s
@@ -146,7 +163,7 @@ function toggleOutput(key, checked) {
       </div>
 
       <div class="modal-body">
-        <div v-for="f in def.fields" v-show="!f.when || f.when(node.data)" :key="f.key" class="field">
+        <div v-for="f in def.fields" v-show="isFieldVisible(f)" :key="f.key" class="field">
           <label>{{ t(f.label) }}</label>
           <select v-if="f.type === 'select'" :value="node.data[f.key]" @change="patch(f.key, $event.target.value)">
             <option v-for="o in optionsFor(f)" :key="o.value" :value="o.value">{{ tl(o.label) }}</option>
@@ -175,6 +192,10 @@ function toggleOutput(key, checked) {
           />
           <input v-else :value="node.data[f.key]" @input="patch(f.key, $event.target.value)" />
         </div>
+
+        <p v-if="node.type === 'Instance' && hasKeyPairNode" class="section-hint">
+          {{ t('inspector.keyPairFromNodeHint') }}
+        </p>
 
         <div v-if="node.type === 'Instance'" class="section">
           <div class="section-title">{{ t('inspector.systemDiskTitle') }}</div>

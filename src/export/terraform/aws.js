@@ -1,4 +1,4 @@
-import { createCloudContext, resolveNextHopNode, parsePortRange, resolveVpcRegion, resolveZone, instanceLoginAuth, collectKeyPairs, resolveInterconnects, routeTablesOfVpc, tlsKeyBlocks, systemDiskConfig, dataDiskConfigs, clean } from './common.js'
+import { createCloudContext, resolveNextHopNode, parsePortRange, resolveVpcRegion, resolveZone, instanceLoginAuth, resolveInstanceKeyPair, collectKeyPairs, resolveInterconnects, routeTablesOfVpc, tlsKeyBlocks, systemDiskConfig, dataDiskConfigs, clean } from './common.js'
 import { translate } from '../../i18n/index.js'
 import { buildOutputs } from './outputs.js'
 
@@ -159,7 +159,7 @@ export function exportAwsTerraform(nodes, edges) {
 }`)
   }
 
-  const keyPairs = collectKeyPairs(nodes)
+  const keyPairs = collectKeyPairs(ctx, nodes)
   for (const [keyName, resName] of keyPairs) {
     blocks.push(`resource "aws_key_pair" "${resName}" {
   key_name   = "${keyName}"
@@ -176,14 +176,17 @@ ${tlsKeyBlocks(keyName, resName)}`)
     const sgRefs = sgs.map((s) => ref(s) + '.id')
     const sgLine = sgRefs.length ? `\n  vpc_security_group_ids   = [${sgRefs.join(', ')}]` : ''
     const auth = instanceLoginAuth(inst.data)
+    const kp = resolveInstanceKeyPair(ctx, inst)
     let authLine = ''
-    if (auth.value) {
-      if (auth.type === 'password') {
-        authLine = `\n  # ${tt('passwordUnsupported')}`
+    if (kp) {
+      // 新建密钥对引用生成的资源；关联现有密钥对直接按名称引用
+      if (kp.mode === 'create') {
+        authLine = `\n  key_name      = aws_key_pair.${keyPairs.get(kp.name)}.key_name`
       } else {
-        const resName = keyPairs.get(clean(auth.value))
-        authLine = `\n  key_name      = aws_key_pair.${resName}.key_name`
+        authLine = `\n  key_name      = "${kp.name}"`
       }
+    } else if (auth.type === 'password' && auth.value) {
+      authLine = `\n  # ${tt('passwordUnsupported')}`
     }
     const marketLine =
       inst.data.chargeType === 'spot'

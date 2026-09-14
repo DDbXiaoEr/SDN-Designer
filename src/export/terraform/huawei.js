@@ -1,4 +1,4 @@
-import { createCloudContext, resolveNextHopNode, parsePortRange, resolveVpcRegion, resolveZone, instanceLoginAuth, collectKeyPairs, resolveInterconnects, routeTablesOfVpc, tlsKeyBlocks, hclLines, systemDiskConfig, dataDiskConfigs, clean } from './common.js'
+import { createCloudContext, resolveNextHopNode, parsePortRange, resolveVpcRegion, resolveZone, instanceLoginAuth, resolveInstanceKeyPair, collectKeyPairs, resolveInterconnects, routeTablesOfVpc, tlsKeyBlocks, hclLines, systemDiskConfig, dataDiskConfigs, clean } from './common.js'
 import { translate } from '../../i18n/index.js'
 import { buildOutputs } from './outputs.js'
 
@@ -171,7 +171,7 @@ export function exportHuaweiTerraform(nodes, edges) {
 }`)
   }
 
-  const keyPairs = collectKeyPairs(nodes)
+  const keyPairs = collectKeyPairs(ctx, nodes)
   for (const [keyName, resName] of keyPairs) {
     blocks.push(`resource "huaweicloud_compute_keypair" "${resName}" {
   name       = "${keyName}"
@@ -187,6 +187,7 @@ ${tlsKeyBlocks(keyName, resName)}`)
     const sgs = ctx.targetNodes(inst.id).filter((n) => n.type === 'SecurityGroup')
     const sgNames = sgs.map((s) => `"${clean(s.data.name)}"`)
     const auth = instanceLoginAuth(inst.data)
+    const kp = resolveInstanceKeyPair(ctx, inst)
     const sysDisk = systemDiskConfig(inst.data, 'GPSSD')
     const dataDisks = dataDiskConfigs(inst.data, 'GPSSD')
     const rows = [
@@ -197,13 +198,15 @@ ${tlsKeyBlocks(keyName, resName)}`)
       ['system_disk_type', `"${sysDisk.type}"`],
       ['system_disk_size', String(sysDisk.size)],
     ]
-    if (auth.value) {
-      if (auth.type === 'password') {
-        rows.push(['admin_pass', `"${auth.value}"`])
+    if (kp) {
+      // 新建密钥对引用生成的资源；关联现有密钥对直接按名称引用
+      if (kp.mode === 'create') {
+        rows.push(['key_pair', `huaweicloud_compute_keypair.${keyPairs.get(kp.name)}.name`])
       } else {
-        const resName = keyPairs.get(clean(auth.value))
-        rows.push(['key_pair', `huaweicloud_compute_keypair.${resName}.name`])
+        rows.push(['key_pair', `"${kp.name}"`])
       }
+    } else if (auth.type === 'password' && auth.value) {
+      rows.push(['admin_pass', `"${auth.value}"`])
     }
     if (sgNames.length) rows.push(['security_groups', `[${sgNames.join(', ')}]`])
     const dataDiskBlock = dataDisks.length

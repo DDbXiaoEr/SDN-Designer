@@ -27,6 +27,7 @@ OVN-Designer/
     │   ├── chargeTypes.js     # 各云厂商实例计费方式（包年包月/按量付费/抢占式）
     │   ├── disks.js           # 各云厂商云盘类型（系统盘/数据盘）
     │   ├── outputs.js         # 云资源「创建后可获取」属性（资源 ID/公网 IP）
+    │   ├── demo.js            # 内置示例拓扑（首次访问自动加载，工具栏可重新载入）
     │   ├── images.js          # 各云厂商本地内置镜像列表（在线清单兜底）
     │   └── instanceTypes.js   # 各云厂商本地内置实例规格列表（在线清单兜底）
     ├── store/
@@ -85,6 +86,7 @@ OVN-Designer/
 | Instance        | cloud   | `name`, `imageId`, `instanceType`, `chargeType`(subscription/payAsYouGo/spot), `privateIp`, `loginType`(keyPair/password), `keyPair`, `password`, `systemDisk{type,size}`, `dataDisks[{type,size}]` |
 | RouteTable      | cloud   | `name`, `routes[]`                                 |
 | Interconnect    | cloud   | `name`（VPC 对等连接，连接多个 VPC）               |
+| KeyPair         | cloud   | `name`, `mode`(create/existing)（登录密钥对，绑定实例） |
 
 ### 连线（Edge）
 
@@ -126,8 +128,15 @@ OVN-Designer/
   选项来自 `data/outputs.js`（按厂商映射只读属性名），在 `NodeEditorDialog` 的「导出输出」分区勾选。
   导出时 `export/terraform/outputs.js` 的 `buildOutputs` 生成 `output` 块，多文件导出中追加 `output.tf`；
   无任何勾选则不生成该文件。
+- `KeyPair` 节点表示登录密钥对：`Instance → KeyPair` 连线表示绑定；`mode='create'` 由 Terraform 新建
+  （`*_key_pair` 资源，腾讯云/AWS/华为云附带 `tls_private_key` 与 `.pem` 私钥文件，阿里云用 `key_file`），
+  `mode='existing'` 关联云上已有密钥对（阿里云/AWS/华为云按名称引用；腾讯云因实例用 `key_ids`，生成
+  `data "tencentcloud_key_pairs"` 按名称查询 ID）。实例已连接 KeyPair 节点时，编辑器隐藏内联「登录密钥对」字段，
+  导出优先使用节点；未连线时回退到内联 `keyPair`（兼容旧设计），密码登录不受影响。
 - 节点属性编辑在 `NodeEditorDialog` 弹窗中完成：双击节点或点击右侧面板的「编辑」打开；
   `Inspector` 仅显示只读摘要与编辑/删除按钮。
+- 内置示例拓扑定义于 `data/demo.js`（`createDemoDesign()` 返回深拷贝）；首次访问（无本地保存设计）
+  自动加载，工具栏「加载示例」可随时重新载入（画布非空时先确认）；边的标签在加载时按当前语言解析。
 
 ### OVN 导出（按执行节点拆分）
 

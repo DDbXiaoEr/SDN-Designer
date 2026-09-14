@@ -1,4 +1,4 @@
-import { createCloudContext, resolveNextHopNode, resolveVpcRegion, resolveZone, instanceLoginAuth, collectKeyPairs, resolveInterconnects, routeTablesOfVpc, tlsKeyBlocks, hclLines, systemDiskConfig, dataDiskConfigs, clean } from './common.js'
+import { createCloudContext, resolveNextHopNode, resolveVpcRegion, resolveZone, instanceLoginAuth, resolveInstanceKeyPair, collectKeyPairs, collectExistingKeyPairs, escapeRegex, resolveInterconnects, routeTablesOfVpc, tlsKeyBlocks, hclLines, systemDiskConfig, dataDiskConfigs, clean } from './common.js'
 import { translate } from '../../i18n/index.js'
 import { buildOutputs } from './outputs.js'
 
@@ -158,7 +158,7 @@ export function exportTencentTerraform(nodes, edges) {
 }`)
   }
 
-  const keyPairs = collectKeyPairs(nodes)
+  const keyPairs = collectKeyPairs(ctx, nodes)
   for (const [keyName, resName] of keyPairs) {
     blocks.push(`resource "tencentcloud_key_pair" "${resName}" {
   key_name   = "${keyName}"
@@ -166,6 +166,14 @@ export function exportTencentTerraform(nodes, edges) {
 }
 
 ${tlsKeyBlocks(keyName, resName)}`)
+  }
+
+  // 关联现有密钥对：实例的 key_ids 需要密钥 ID，按名称查询 data source
+  const existingKeyPairs = collectExistingKeyPairs(ctx, nodes)
+  for (const [keyName, resName] of existingKeyPairs) {
+    blocks.push(`data "tencentcloud_key_pairs" "${resName}" {
+  key_name = "^${escapeRegex(keyName)}$"
+}`)
   }
 
   for (const inst of nodes.filter((n) => n.type === 'Instance')) {
@@ -176,6 +184,7 @@ ${tlsKeyBlocks(keyName, resName)}`)
     const sgs = ctx.targetNodes(inst.id).filter((n) => n.type === 'SecurityGroup')
     const sgRefs = sgs.map((s) => ref(s) + '.id')
     const auth = instanceLoginAuth(inst.data)
+    const kp = resolveInstanceKeyPair(ctx, inst)
     const sysDisk = systemDiskConfig(inst.data, 'CLOUD_PREMIUM')
     const dataDisks = dataDiskConfigs(inst.data, 'CLOUD_PREMIUM')
     const rows = [
@@ -190,13 +199,18 @@ ${tlsKeyBlocks(keyName, resName)}`)
       ['system_disk_size', String(sysDisk.size)],
     ]
     if (sgRefs.length) rows.push(['security_groups', `[${sgRefs.join(', ')}]`])
-    if (auth.value) {
-      if (auth.type === 'password') {
-        rows.push(['password', `"${auth.value}"`])
+    if (kp) {
+      // 新建密钥对引用生成的资源；关联现有密钥对通过 data source 查询 ID
+      if (kp.mode === 'create') {
+        rows.push(['key_ids', `[tencentcloud_key_pair.${keyPairs.get(kp.name)}.id]`])
       } else {
-        const resName = keyPairs.get(clean(auth.value))
-        rows.push(['key_ids', `[tencentcloud_key_pair.${resName}.id]`])
+        rows.push([
+          'key_ids',
+          `[data.tencentcloud_key_pairs.${existingKeyPairs.get(kp.name)}.key_pair_list[0].key_id]`,
+        ])
       }
+    } else if (auth.type === 'password' && auth.value) {
+      rows.push(['password', `"${auth.value}"`])
     }
     const dataDiskBlock = dataDisks.length
       ? '\n\n' +

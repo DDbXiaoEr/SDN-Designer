@@ -1,4 +1,4 @@
-import { createCloudContext, resolveNextHopNode, resolveVpcRegion, resolveZone, instanceLoginAuth, collectKeyPairs, resolveInterconnects, routeTablesOfVpc, hclLines, systemDiskConfig, dataDiskConfigs, clean } from './common.js'
+import { createCloudContext, resolveNextHopNode, resolveVpcRegion, resolveZone, instanceLoginAuth, resolveInstanceKeyPair, collectKeyPairs, resolveInterconnects, routeTablesOfVpc, hclLines, systemDiskConfig, dataDiskConfigs, clean } from './common.js'
 import { translate } from '../../i18n/index.js'
 import { buildOutputs } from './outputs.js'
 
@@ -146,7 +146,7 @@ export function exportAliyunTerraform(nodes, edges) {
       })
   }
 
-  const keyPairs = collectKeyPairs(nodes)
+  const keyPairs = collectKeyPairs(ctx, nodes)
   for (const [keyName, resName] of keyPairs) {
     blocks.push(`resource "alicloud_key_pair" "${resName}" {
   key_name = "${keyName}"
@@ -160,6 +160,7 @@ export function exportAliyunTerraform(nodes, edges) {
     const sgs = ctx.targetNodes(inst.id).filter((n) => n.type === 'SecurityGroup')
     const sgRefs = sgs.map((s) => ref(s) + '.id')
     const auth = instanceLoginAuth(inst.data)
+    const kp = resolveInstanceKeyPair(ctx, inst)
     const sysDisk = systemDiskConfig(inst.data, 'cloud_essd')
     const dataDisks = dataDiskConfigs(inst.data, 'cloud_essd')
     const rows = [
@@ -174,14 +175,15 @@ export function exportAliyunTerraform(nodes, edges) {
       ['system_disk_size', String(sysDisk.size)],
     ]
     if (sgRefs.length) rows.push(['security_groups', `[${sgRefs.join(', ')}]`])
-    if (auth.value) {
-      if (auth.type === 'password') {
-        rows.push(['password', `"${auth.value}"`])
+    if (kp) {
+      // 新建密钥对引用生成的资源；关联现有密钥对直接按名称引用
+      if (kp.mode === 'create') {
+        rows.push(['key_name', `alicloud_key_pair.${keyPairs.get(kp.name)}.key_name`])
       } else {
-        const keyName = clean(auth.value)
-        const resName = keyPairs.get(keyName)
-        rows.push(['key_name', `alicloud_key_pair.${resName}.key_name`])
+        rows.push(['key_name', `"${kp.name}"`])
       }
+    } else if (auth.type === 'password' && auth.value) {
+      rows.push(['password', `"${auth.value}"`])
     }
     const dataDiskBlock = dataDisks.length
       ? '\n\n' +

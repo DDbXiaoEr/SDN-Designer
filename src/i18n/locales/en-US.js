@@ -21,6 +21,8 @@ export default {
     importDesign: 'Import design',
     importError: 'Import failed: invalid file format',
     language: 'Language',
+    loadDemo: 'Load demo',
+    loadDemoConfirm: 'Loading the demo will replace the current canvas. Continue?',
   },
   palette: {
     title: 'Node Library',
@@ -91,6 +93,12 @@ export default {
       aws: 'VPC Peering',
       huawei: 'VPC Peering',
     },
+    keyPair: {
+      aliyun: 'Key Pair',
+      tencent: 'Key Pair',
+      aws: 'Key Pair',
+      huawei: 'Key Pair',
+    },
   },
   fields: {
     name: 'Name',
@@ -110,6 +118,7 @@ export default {
     privateIp: 'Private IP',
     loginType: 'Login Method',
     keyPair: 'Login Key Pair',
+    keyPairMode: 'Key Pair Source',
     password: 'Login Password',
     bandwidth: 'Bandwidth (Mbps)',
     internetChargeType: 'Internet Charge Type',
@@ -122,6 +131,10 @@ export default {
   internetChargeTypes: {
     traffic: 'Pay by traffic',
     bandwidth: 'Pay by bandwidth',
+  },
+  keyPairModes: {
+    create: 'Create new key pair',
+    existing: 'Use existing key pair',
   },
   outputs: {
     id: 'Resource ID',
@@ -143,6 +156,7 @@ export default {
     bandwidth: 'Bandwidth',
     charge: 'Billing',
     disk: 'Disk',
+    keyPairMode: 'Source',
   },
   connections: {
     vmToSwitch: 'attach port',
@@ -154,6 +168,7 @@ export default {
     vpcToSubnet: 'contains subnet',
     subnetToInstance: 'deploy instance',
     instanceToSg: 'join security group',
+    instanceToKeyPair: 'bind key pair',
     eipToInstance: 'associate instance',
     subnetToGateway: 'deploy gateway',
     subnetToRouteTable: 'associate route table',
@@ -189,6 +204,7 @@ export default {
     addDataDisk: 'Add Data Disk',
     outputsTitle: 'Export Outputs (Known After Creation)',
     outputsHint: 'These values are only known after resources are created. Selecting them adds matching outputs to the exported output.tf.',
+    keyPairFromNodeHint: 'The login key pair is provided by the connected Key Pair node.',
   },
   createHost: {
     title: 'Create Host Chassis',

@@ -148,17 +148,47 @@ export function validateZones(nodes, edges, vendor) {
   return issues
 }
 
-// 收集实例使用的密钥对名称，去重后返回 keyName -> 资源标识
-export function collectKeyPairs(nodes) {
+// 解析实例的密钥对来源：优先取直连的 KeyPair 节点（Instance -> KeyPair），
+// 否则回退到实例内联的 keyPair 字段（兼容旧设计）；密码登录返回 null
+export function resolveInstanceKeyPair(ctx, inst) {
+  const linked = ctx.targetNodes(inst.id).find((n) => n.type === 'KeyPair')
+  if (linked) {
+    return {
+      mode: linked.data.mode === 'existing' ? 'existing' : 'create',
+      name: clean(linked.data.name),
+    }
+  }
+  const auth = instanceLoginAuth(inst.data)
+  if (auth.type === 'keyPair' && clean(auth.value)) {
+    return { mode: 'create', name: clean(auth.value) }
+  }
+  return null
+}
+
+// 收集实例使用的「新建」密钥对名称，去重后返回 keyName -> 资源标识
+export function collectKeyPairs(ctx, nodes) {
+  return collectKeyPairsByMode(ctx, nodes, 'create')
+}
+
+// 收集实例关联的「现有」密钥对名称，去重后返回 keyName -> 资源标识（供腾讯云 data source）
+export function collectExistingKeyPairs(ctx, nodes) {
+  return collectKeyPairsByMode(ctx, nodes, 'existing')
+}
+
+function collectKeyPairsByMode(ctx, nodes, mode) {
   const keyPairs = new Map()
   for (const inst of nodes.filter((n) => n.type === 'Instance')) {
-    const auth = instanceLoginAuth(inst.data)
-    if (auth.type === 'keyPair' && clean(auth.value)) {
-      const keyName = clean(auth.value)
-      if (!keyPairs.has(keyName)) keyPairs.set(keyName, slug(keyName) || 'keyPair')
+    const kp = resolveInstanceKeyPair(ctx, inst)
+    if (kp && kp.mode === mode && kp.name && !keyPairs.has(kp.name)) {
+      keyPairs.set(kp.name, slug(kp.name) || 'keyPair')
     }
   }
   return keyPairs
+}
+
+// 转义正则特殊字符（腾讯云按名称查询密钥对使用正则匹配）
+export function escapeRegex(value) {
+  return String(value ?? '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
 
 // 生成 tls 私钥与 local_file，将私钥保存到本地 <keyName>.pem

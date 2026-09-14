@@ -21,6 +21,8 @@ export default {
     importDesign: '导入设计',
     importError: '无法导入：文件格式无效',
     language: '语言',
+    loadDemo: '加载示例',
+    loadDemoConfirm: '加载示例将覆盖当前画布，确定继续？',
   },
   palette: {
     title: '节点库',
@@ -91,6 +93,12 @@ export default {
       aws: 'VPC 对等连接',
       huawei: 'VPC 对等连接',
     },
+    keyPair: {
+      aliyun: '密钥对',
+      tencent: '密钥对',
+      aws: '密钥对 (Key Pair)',
+      huawei: '密钥对',
+    },
   },
   fields: {
     name: '名称',
@@ -110,6 +118,7 @@ export default {
     privateIp: '私网 IP',
     loginType: '登录方式',
     keyPair: '登录密钥对',
+    keyPairMode: '密钥对来源',
     password: '登录密码',
     bandwidth: '带宽 (Mbps)',
     internetChargeType: '公网计费方式',
@@ -122,6 +131,10 @@ export default {
   internetChargeTypes: {
     traffic: '按使用流量',
     bandwidth: '按固定带宽',
+  },
+  keyPairModes: {
+    create: '新建密钥对',
+    existing: '关联现有密钥对',
   },
   outputs: {
     id: '资源 ID',
@@ -143,6 +156,7 @@ export default {
     bandwidth: '带宽',
     charge: '计费',
     disk: '磁盘',
+    keyPairMode: '来源',
   },
   connections: {
     vmToSwitch: '挂载端口',
@@ -154,6 +168,7 @@ export default {
     vpcToSubnet: '包含子网',
     subnetToInstance: '部署实例',
     instanceToSg: '加入安全组',
+    instanceToKeyPair: '绑定密钥对',
     eipToInstance: '绑定实例',
     subnetToGateway: '部署网关',
     subnetToRouteTable: '关联路由表',
@@ -189,6 +204,7 @@ export default {
     addDataDisk: '添加数据盘',
     outputsTitle: '导出输出（创建后获取）',
     outputsHint: '这些属性在云上创建后才能确定，勾选后会在导出的 output.tf 中生成对应 output。',
+    keyPairFromNodeHint: '登录密钥对由连接的密钥对节点提供，此处不再单独填写。',
   },
   createHost: {
     title: '创建宿主机 Chassis',
