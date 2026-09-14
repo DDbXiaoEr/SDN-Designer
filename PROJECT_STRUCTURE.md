@@ -15,9 +15,12 @@ OVN-Designer/
 ├── index.html                 # 入口 HTML
 ├── package.json               # 依赖与脚本 (dev / build / preview)
 ├── vite.config.js             # Vite 配置（@vitejs/plugin-vue）
+├── .env.example               # 在线清单环境变量示例（VITE_CATALOG_*）
+├── README.md / README.en.md   # 中英文说明
+├── PROJECT_STRUCTURE.md       # 本文件：目录结构与数据模型
 └── src/
     ├── main.js                # 应用入口：createApp(App).use(i18n).mount('#app')
-    ├── App.vue                # 主编排：画布、拖拽、连线校验、导出、创建对话框
+    ├── App.vue                # 主编排：画布、拖拽、连线校验、示例加载、保存/导入、导出、创建对话框
     ├── styles/
     │   └── main.css           # 全局 CSS 变量（主题色）与基础样式
     ├── data/
@@ -33,6 +36,7 @@ OVN-Designer/
     ├── store/
     │   ├── designer.js        # 状态管理（provide/inject 封装 useVueFlow）
     │   ├── catalog.js         # 镜像/实例规格清单：本地内置 + 在线 JSON/厂商 API 合并
+    │   ├── persistence.js     # 设计序列化/反序列化 + localStorage 自动保存
     │   └── vendor.js          # 当前云厂商（ref，持久化到 localStorage）
     ├── nodes/
     │   ├── BaseNode.vue       # 通用节点外观组件（徽标/名称/摘要/多连接点）
@@ -40,16 +44,16 @@ OVN-Designer/
     │   └── index.js           # nodeTypes 映射（markRaw(BaseNode) 复用）
     ├── components/
     │   ├── Palette.vue        # 左侧节点库（可拖拽）
-    │   ├── Toolbar.vue        # 顶部工具栏（厂商/语言切换/清空/导出）
+    │   ├── Toolbar.vue        # 顶部工具栏（厂商/语言/加载示例/清空/保存/导入/导出）
     │   ├── Inspector.vue      # 右侧属性面板（只读摘要 + 编辑/删除按钮）
-    │   ├── NodeEditorDialog.vue # 节点编辑弹窗（双击节点或点「编辑」打开）
+    │   ├── NodeEditorDialog.vue # 节点编辑弹窗（字段编辑 + 网卡/规则/路由/磁盘/输出分区）
     │   ├── CreateHostDialog.vue # 创建宿主机对话框（填写网卡信息）
     │   └── ExportModal.vue    # 导出结果弹窗（分组查看/复制/下载/打包 ZIP/填写凭证）
     ├── export/
     │   ├── utils.js           # 通用工具：CIDR/MAC/图关系/computeZones/download/createZip
     │   ├── ovn.js             # exportOvn(nodes, edges) -> {targets, all}（按执行节点拆分）
     │   └── terraform/
-    │       ├── common.js      # 云资源导出共享上下文（命名/引用/VPC解析/下一跳）
+    │       ├── common.js      # 导出共享上下文与工具（命名/引用/VPC解析/下一跳/密钥对/磁盘/tls）
     │       ├── outputs.js     # buildOutputs：生成 output.tf（创建后可获取属性）
     │       ├── index.js       # exportTerraform(nodes, edges, vendor) 按厂商分发
     │       ├── aliyun.js      # 阿里云 Terraform 导出
@@ -98,8 +102,8 @@ OVN-Designer/
 - 当多个 Host 通过隧道互联时，`designer.js` 的 `recomputeClusters()` 会自动把它们归并为
   一个 `Cluster` 分组节点（Vue Flow parent/child），`VPC → Cluster` 连线表示 VPC 部署到该集群。
   删除 Cluster 节点会解散分组（移除内部隧道连线并还原 Host 绝对位置）。
-- `NODE_TYPES` 中 `handles: { source, target }` 控制节点左右两侧的连接点数量（Host 默认 4/4，其余 2/2）；
-  `hidden: true` 的节点类型不会出现在左侧节点库。
+- `NODE_TYPES` 中 `handles: { source, target }` 控制节点左右两侧的连接点数量（默认 2/2；
+  Host 为 4/4、KeyPair 为 2/4、Interconnect 为 1/8）；`hidden: true` 的节点类型不会出现在左侧节点库。
 - 点击连线即删除：`App.vue` 的 `onEdgeClick` → `removeEdge`（Host↔Host 隧道连线删除后重算集群）；
   连线通过 `interactionWidth` 与 CSS 扩大可点击热区，悬停时高亮为警示色作为反馈。
 

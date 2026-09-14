@@ -21,6 +21,7 @@ npm run preview    # 预览生产构建
 - Vue 3 组合式 API + `<script setup>`；保持现有代码风格与命名。
 - **为关键逻辑添加简洁注释**：新增/修改的功能、易混淆的取值与边界处理应加注释说明意图；注释与说明文字使用中文，避免无意义的逐行复述。
 - **不要主动提交代码**，仅在用户明确要求时提交。
+- **文件变动时及时同步 [`PROJECT_STRUCTURE.md`](./PROJECT_STRUCTURE.md)**：新增/删除/重命名文件、调整目录，或修改数据模型与关键流程时，必须在同一次改动中更新对应内容（目录树、数据模型表、约定/说明），保证文档与代码一致。
 - 新增节点类型 → 在 `src/data/nodeDefinitions.js` 添加 `NODE_TYPES` 记录 + `CONNECTION_RULES` + 双语 i18n 文案。
 - 所有 UI 文案走 vue-i18n（`useI18n().t` / `translate()`），同时更新 `zh-CN.js` 与 `en-US.js`。
 - 节点/边状态通过 `createDesigner()` / `useDesigner()` 管理（见 PROJECT_STRUCTURE.md 约定），勿用 `v-model:nodes`。
