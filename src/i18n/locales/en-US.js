@@ -23,6 +23,8 @@ export default {
     language: 'Language',
     loadDemo: 'Load demo',
     loadDemoConfirm: 'Loading the demo will replace the current canvas. Continue?',
+    providerVersion: 'Provider version',
+    providerVersionHint: 'Provider version constraint written to provider.tf, e.g. ~> 5.0 or >= 1.200.0',
   },
   palette: {
     title: 'Node Library',

@@ -17,11 +17,11 @@ const resourceTypes = {
   interconnect: 'huaweicloud_vpc_peering_connection',
 }
 
-const providerBlock = () => `terraform {
+const providerBlock = (providerVersion) => `terraform {
   required_providers {
     huaweicloud = {
       source  = "huaweicloud/huaweicloud"
-      version = "~> 1.60"
+      version = "${providerVersion}"
     }
     tls = {
       source  = "hashicorp/tls"
@@ -90,7 +90,7 @@ function huaweiChargeRows(chargeType) {
   return [['charging_mode', '"postPaid"']]
 }
 
-export function exportHuaweiTerraform(nodes, edges) {
+export function exportHuaweiTerraform(nodes, edges, providerVersion) {
   const ctx = createCloudContext(nodes, edges, resourceTypes)
   const { ref, findVpc, findSubnet } = ctx
   const region = resolveVpcRegion(nodes, 'cn-north-4')
@@ -287,7 +287,7 @@ ${hclLines(rows)}${dataDiskBlock}
   }
 
   return {
-    provider: providerBlock(),
+    provider: providerBlock(providerVersion),
     variables: variablesBlock(region),
     main: blocks.join('\n\n') + '\n',
     outputs: buildOutputs(ctx, nodes, 'huawei'),

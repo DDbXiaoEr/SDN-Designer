@@ -2,7 +2,7 @@
 import { useI18n } from 'vue-i18n'
 import { setLocale, SUPPORTED_LOCALES } from '../i18n/index.js'
 import { VENDORS } from '../data/vendors.js'
-import { vendor, setVendor } from '../store/vendor.js'
+import { vendor, setVendor, providerVersion, setProviderVersion } from '../store/vendor.js'
 
 defineProps({
   nodesCount: { type: Number, default: 0 },
@@ -21,6 +21,10 @@ function switchLocale() {
 function onVendorChange(e) {
   setVendor(e.target.value)
 }
+
+function onProviderVersionChange(e) {
+  setProviderVersion(vendor.value, e.target.value)
+}
 </script>
 
 <template>
@@ -34,6 +38,16 @@ function onVendorChange(e) {
       <select class="vendor-select" :value="vendor" @change="onVendorChange">
         <option v-for="v in VENDORS" :key="v.value" :value="v.value">{{ t(v.label) }}</option>
       </select>
+      <label class="provider-version">
+        <span>{{ t('toolbar.providerVersion') }}</span>
+        <input
+          class="provider-input"
+          :value="providerVersion"
+          :title="t('toolbar.providerVersionHint')"
+          spellcheck="false"
+          @input="onProviderVersionChange"
+        />
+      </label>
       <button class="ghost" @click="switchLocale">{{ t('toolbar.language') }}: {{ locale }}</button>
       <button class="ghost" @click="emit('load-demo')">{{ t('toolbar.loadDemo') }}</button>
       <button class="ghost" @click="emit('clear')">{{ t('toolbar.clear') }}</button>
@@ -112,5 +126,24 @@ button.ghost {
   padding: 7px 10px;
   font-size: 13px;
   font-weight: 600;
+}
+.provider-version {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-dim);
+  white-space: nowrap;
+}
+.provider-input {
+  width: 108px;
+  border: 1px solid var(--border);
+  background: var(--panel-2);
+  color: var(--text);
+  border-radius: 7px;
+  padding: 7px 10px;
+  font-size: 13px;
+  font-weight: 600;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 </style>

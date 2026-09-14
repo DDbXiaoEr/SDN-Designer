@@ -10,6 +10,18 @@ export const VENDORS = [
 
 export const DEFAULT_VENDOR = 'aliyun'
 
+// 各厂商主 provider 的默认版本约束（工具栏可覆盖，写入 provider.tf 的 required_providers）
+export const DEFAULT_PROVIDER_VERSIONS = {
+  aliyun: '>= 1.200.0',
+  tencent: '~> 1.81',
+  aws: '~> 5.0',
+  huawei: '~> 1.60',
+}
+
+export function defaultProviderVersion(v) {
+  return DEFAULT_PROVIDER_VERSIONS[v] || ''
+}
+
 export function isVendor(v) {
   return VENDORS.some((x) => x.value === v)
 }

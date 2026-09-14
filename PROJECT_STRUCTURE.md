@@ -25,7 +25,7 @@ OVN-Designer/
     │   └── main.css           # 全局 CSS 变量（主题色）与基础样式
     ├── data/
     │   ├── nodeDefinitions.js # 节点类型元数据（唯一数据源）
-    │   ├── vendors.js         # 云厂商列表 + 资源名/徽标按厂商解析
+    │   ├── vendors.js         # 云厂商列表 + 资源名/徽标按厂商解析 + provider 默认版本
     │   ├── regions.js         # 各云厂商地域列表与默认地域
     │   ├── chargeTypes.js     # 各云厂商实例计费方式（包年包月/按量付费/抢占式）
     │   ├── disks.js           # 各云厂商云盘类型（系统盘/数据盘）
@@ -37,14 +37,14 @@ OVN-Designer/
     │   ├── designer.js        # 状态管理（provide/inject 封装 useVueFlow）
     │   ├── catalog.js         # 镜像/实例规格清单：本地内置 + 在线 JSON/厂商 API 合并
     │   ├── persistence.js     # 设计序列化/反序列化 + localStorage 自动保存
-    │   └── vendor.js          # 当前云厂商（ref，持久化到 localStorage）
+    │   └── vendor.js          # 当前云厂商 + 各厂商 provider 版本（ref，持久化到 localStorage）
     ├── nodes/
     │   ├── BaseNode.vue       # 通用节点外观组件（徽标/名称/摘要/多连接点）
     │   ├── ClusterNode.vue    # 集群分组节点外观（Host 自动归并后的大节点）
     │   └── index.js           # nodeTypes 映射（markRaw(BaseNode) 复用）
     ├── components/
     │   ├── Palette.vue        # 左侧节点库（可拖拽）
-    │   ├── Toolbar.vue        # 顶部工具栏（厂商/语言/加载示例/清空/保存/导入/导出）
+    │   ├── Toolbar.vue        # 顶部工具栏（厂商/Provider 版本/语言/加载示例/清空/保存/导入/导出）
     │   ├── Inspector.vue      # 右侧属性面板（只读摘要 + 编辑/删除按钮）
     │   ├── NodeEditorDialog.vue # 节点编辑弹窗（字段编辑 + 网卡/规则/路由/磁盘/输出分区）
     │   ├── CreateHostDialog.vue # 创建宿主机对话框（填写网卡信息）
@@ -110,6 +110,9 @@ OVN-Designer/
 ### 云厂商（vendor）
 
 - 工具栏选择云厂商：`aliyun` / `tencent` / `aws` / `huawei`，存于 `store/vendor.js`，持久化到 localStorage。
+- 工具栏「Provider 版本」输入框对应当前厂商，写入 `provider.tf` 中主 provider 的 `version` 约束
+  （如 `~> 5.0` / `>= 1.200.0`）；各厂商版本独立保存于 `store/vendor.js` 的 `providerVersions`，
+  留空时回退到 `vendors.js` 的 `DEFAULT_PROVIDER_VERSIONS`。`tls` / `local` 等辅助 provider 版本固定不变。
 - 云资源节点的展示名与徽标按厂商变化（`vendors.js` 的 `nodeLabelKey` / `nodeBadge`）：
   i18n 中 `nodes.vpc` / `nodes.subnet` / `nodes.instance` 等为按厂商分组的对象。
 - Terraform 导出按厂商分发（`export/terraform/index.js`）；OVN 导出与厂商无关。

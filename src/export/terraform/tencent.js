@@ -17,11 +17,11 @@ const resourceTypes = {
   interconnect: 'tencentcloud_vpc_peering_connection',
 }
 
-const providerBlock = () => `terraform {
+const providerBlock = (providerVersion) => `terraform {
   required_providers {
     tencentcloud = {
       source  = "tencentcloudstack/tencentcloud"
-      version = "~> 1.81"
+      version = "${providerVersion}"
     }
     tls = {
       source  = "hashicorp/tls"
@@ -84,7 +84,7 @@ function tencentChargeRows(chargeType) {
   return [['instance_charge_type', '"POSTPAID_BY_HOUR"']]
 }
 
-export function exportTencentTerraform(nodes, edges) {
+export function exportTencentTerraform(nodes, edges, providerVersion) {
   const ctx = createCloudContext(nodes, edges, resourceTypes)
   const { ref, findVpc, findSubnet } = ctx
   const region = resolveVpcRegion(nodes, 'ap-guangzhou')
@@ -287,7 +287,7 @@ ${hclLines(rows)}${dataDiskBlock}
   }
 
   return {
-    provider: providerBlock(),
+    provider: providerBlock(providerVersion),
     variables: variablesBlock(region),
     main: blocks.join('\n\n') + '\n',
     outputs: buildOutputs(ctx, nodes, 'tencent'),

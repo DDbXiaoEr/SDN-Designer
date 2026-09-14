@@ -17,11 +17,11 @@ const resourceTypes = {
   interconnect: 'aws_vpc_peering_connection',
 }
 
-const providerBlock = () => `terraform {
+const providerBlock = (providerVersion) => `terraform {
   required_providers {
     aws = {
       source  = "hashicorp/aws"
-      version = "~> 5.0"
+      version = "${providerVersion}"
     }
     tls = {
       source  = "hashicorp/tls"
@@ -67,7 +67,7 @@ function awsProtocol(protocol) {
   return protocol
 }
 
-export function exportAwsTerraform(nodes, edges) {
+export function exportAwsTerraform(nodes, edges, providerVersion) {
   const ctx = createCloudContext(nodes, edges, resourceTypes)
   const { ref, findVpc, findSubnet } = ctx
   const region = resolveVpcRegion(nodes, 'us-east-1')
@@ -276,7 +276,7 @@ ${hopLine}
   }
 
   return {
-    provider: providerBlock(),
+    provider: providerBlock(providerVersion),
     variables: variablesBlock(region),
     main: blocks.join('\n\n') + '\n',
     outputs: buildOutputs(ctx, nodes, 'aws'),

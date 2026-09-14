@@ -14,7 +14,7 @@ import { exportTerraform } from './export/terraform/index.js'
 import { validateZones } from './export/terraform/common.js'
 import { download } from './export/utils.js'
 import { serializeDesign, deserializeDesign, loadFromStorage } from './store/persistence.js'
-import { vendor } from './store/vendor.js'
+import { vendor, providerVersion } from './store/vendor.js'
 import Palette from './components/Palette.vue'
 import Toolbar from './components/Toolbar.vue'
 import Inspector from './components/Inspector.vue'
@@ -205,7 +205,7 @@ const CREDENTIAL_FIELDS = {
 }
 
 function showTerraform() {
-  const files = exportTerraform(nodes.value, edges.value, vendor.value)
+  const files = exportTerraform(nodes.value, edges.value, vendor.value, providerVersion.value)
   const warnings = validateZones(nodes.value, edges.value, vendor.value).map((issue) =>
     t('export.zoneMismatch', {
       subnet: issue.name,

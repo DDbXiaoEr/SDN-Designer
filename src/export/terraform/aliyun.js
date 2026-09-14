@@ -17,11 +17,11 @@ const resourceTypes = {
   interconnect: 'alicloud_vpc_peer_connection',
 }
 
-const providerBlock = () => `terraform {
+const providerBlock = (providerVersion) => `terraform {
   required_providers {
     alicloud = {
       source  = "aliyun/alicloud"
-      version = ">= 1.200.0"
+      version = "${providerVersion}"
     }
   }
 }
@@ -70,7 +70,7 @@ function aliyunChargeRows(chargeType) {
   return [['instance_charge_type', '"PostPaid"']]
 }
 
-export function exportAliyunTerraform(nodes, edges) {
+export function exportAliyunTerraform(nodes, edges, providerVersion) {
   const ctx = createCloudContext(nodes, edges, resourceTypes)
   const { ref, findVpc, findSubnet } = ctx
   const region = resolveVpcRegion(nodes, 'cn-hangzhou')
@@ -249,7 +249,7 @@ ${hclLines(rows)}${dataDiskBlock}
   }
 
   return {
-    provider: providerBlock(),
+    provider: providerBlock(providerVersion),
     variables: variablesBlock(region),
     main: blocks.join('\n\n') + '\n',
     outputs: buildOutputs(ctx, nodes, 'aliyun'),
