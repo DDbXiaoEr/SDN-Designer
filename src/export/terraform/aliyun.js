@@ -1,5 +1,6 @@
-import { createCloudContext, resolveNextHopNode, resolveVpcRegion, resolveZone, instanceLoginAuth, collectKeyPairs, resolveInterconnects, routeTablesOfVpc, hclLines, clean } from './common.js'
+import { createCloudContext, resolveNextHopNode, resolveVpcRegion, resolveZone, instanceLoginAuth, collectKeyPairs, resolveInterconnects, routeTablesOfVpc, hclLines, systemDiskConfig, dataDiskConfigs, clean } from './common.js'
 import { translate } from '../../i18n/index.js'
+import { buildOutputs } from './outputs.js'
 
 const tt = (key) => translate(`export.${key}`)
 
@@ -159,6 +160,8 @@ export function exportAliyunTerraform(nodes, edges) {
     const sgs = ctx.targetNodes(inst.id).filter((n) => n.type === 'SecurityGroup')
     const sgRefs = sgs.map((s) => ref(s) + '.id')
     const auth = instanceLoginAuth(inst.data)
+    const sysDisk = systemDiskConfig(inst.data, 'cloud_essd')
+    const dataDisks = dataDiskConfigs(inst.data, 'cloud_essd')
     const rows = [
       ['instance_name', `"${clean(inst.data.name)}"`],
       ['instance_type', `"${inst.data.instanceType}"`],
@@ -167,7 +170,8 @@ export function exportAliyunTerraform(nodes, edges) {
       ['vswitch_id', vswRef],
       ['private_ip', `"${inst.data.privateIp}"`],
       ['internet_max_bandwidth_out', '0'],
-      ['system_disk_size', '40'],
+      ['system_disk_category', `"${sysDisk.type}"`],
+      ['system_disk_size', String(sysDisk.size)],
     ]
     if (sgRefs.length) rows.push(['security_groups', `[${sgRefs.join(', ')}]`])
     if (auth.value) {
@@ -179,8 +183,19 @@ export function exportAliyunTerraform(nodes, edges) {
         rows.push(['key_name', `alicloud_key_pair.${resName}.key_name`])
       }
     }
+    const dataDiskBlock = dataDisks.length
+      ? '\n\n' +
+        dataDisks
+          .map(
+            (d) => `  data_disks {
+    category = "${d.type}"
+    size     = ${d.size}
+  }`
+          )
+          .join('\n')
+      : ''
     blocks.push(`resource "alicloud_instance" "${ctx.name(inst)}" {
-${hclLines(rows)}
+${hclLines(rows)}${dataDiskBlock}
 }`)
   }
 
@@ -235,5 +250,6 @@ ${hclLines(rows)}
     provider: providerBlock(),
     variables: variablesBlock(region),
     main: blocks.join('\n\n') + '\n',
+    outputs: buildOutputs(ctx, nodes, 'aliyun'),
   }
 }

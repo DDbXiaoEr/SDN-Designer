@@ -123,6 +123,10 @@ export default {
     traffic: '按使用流量',
     bandwidth: '按固定带宽',
   },
+  outputs: {
+    id: '资源 ID',
+    publicIp: '公网 IP',
+  },
   summary: {
     cidr: 'CIDR',
     ip: 'IP',
@@ -138,6 +142,7 @@ export default {
     hosts: '主机',
     bandwidth: '带宽',
     charge: '计费',
+    disk: '磁盘',
   },
   connections: {
     vmToSwitch: '挂载端口',
@@ -178,6 +183,12 @@ export default {
     natGateway: 'NAT 网关',
     ecsInstance: 'ECS 实例',
     vpnGateway: 'VPN 网关',
+    systemDiskTitle: '系统盘',
+    dataDiskTitle: '数据盘',
+    diskSizePlaceholder: '容量 (GiB)',
+    addDataDisk: '添加数据盘',
+    outputsTitle: '导出输出（创建后获取）',
+    outputsHint: '这些属性在云上创建后才能确定，勾选后会在导出的 output.tf 中生成对应 output。',
   },
   createHost: {
     title: '创建宿主机 Chassis',

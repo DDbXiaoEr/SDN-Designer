@@ -123,6 +123,10 @@ export default {
     traffic: 'Pay by traffic',
     bandwidth: 'Pay by bandwidth',
   },
+  outputs: {
+    id: 'Resource ID',
+    publicIp: 'Public IP',
+  },
   summary: {
     cidr: 'CIDR',
     ip: 'IP',
@@ -138,6 +142,7 @@ export default {
     hosts: 'hosts',
     bandwidth: 'Bandwidth',
     charge: 'Billing',
+    disk: 'Disk',
   },
   connections: {
     vmToSwitch: 'attach port',
@@ -178,6 +183,12 @@ export default {
     natGateway: 'NAT Gateway',
     ecsInstance: 'ECS Instance',
     vpnGateway: 'VPN Gateway',
+    systemDiskTitle: 'System Disk',
+    dataDiskTitle: 'Data Disks',
+    diskSizePlaceholder: 'Size (GiB)',
+    addDataDisk: 'Add Data Disk',
+    outputsTitle: 'Export Outputs (Known After Creation)',
+    outputsHint: 'These values are only known after resources are created. Selecting them adds matching outputs to the exported output.tf.',
   },
   createHost: {
     title: 'Create Host Chassis',

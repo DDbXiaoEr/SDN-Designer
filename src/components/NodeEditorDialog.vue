@@ -2,6 +2,8 @@
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { NODE_TYPES } from '../data/nodeDefinitions.js'
+import { diskTypeOptions, defaultDiskType } from '../data/disks.js'
+import { outputOptions } from '../data/outputs.js'
 import { nodeLabelKey } from '../data/vendors.js'
 import { vendor } from '../store/vendor.js'
 import { useDesigner } from '../store/designer.js'
@@ -91,6 +93,47 @@ function nicPatch(i, key, value) {
   nics[i] = { ...nics[i], [key]: value }
   patch('nics', nics)
 }
+
+const diskOptions = computed(() => diskTypeOptions(vendor.value))
+const systemDisk = computed(() => {
+  const d = node.value && node.value.data.systemDisk
+  return d || { type: defaultDiskType(vendor.value), size: 40 }
+})
+
+function systemDiskPatch(key, value) {
+  const cur = node.value.data.systemDisk || { type: defaultDiskType(vendor.value), size: 40 }
+  patch('systemDisk', { ...cur, [key]: key === 'size' ? Number(value) : value })
+}
+function addDataDisk() {
+  const disks = [...(node.value.data.dataDisks || [])]
+  disks.push({ type: defaultDiskType(vendor.value), size: 100 })
+  patch('dataDisks', disks)
+}
+function removeDataDisk(i) {
+  const disks = [...(node.value.data.dataDisks || [])]
+  disks.splice(i, 1)
+  patch('dataDisks', disks)
+}
+function dataDiskPatch(i, key, value) {
+  const disks = [...(node.value.data.dataDisks || [])]
+  disks[i] = { ...disks[i], [key]: key === 'size' ? Number(value) : value }
+  patch('dataDisks', disks)
+}
+
+// 「创建后获取」的可输出属性（按当前厂商/节点类型解析），勾选结果存入 data.outputs
+const nodeOutputs = computed(() => (node.value ? outputOptions(vendor.value, node.value.type) : []))
+const selectedOutputs = computed(() =>
+  Array.isArray(node.value?.data.outputs) ? node.value.data.outputs : []
+)
+
+function toggleOutput(key, checked) {
+  const next = new Set(selectedOutputs.value)
+  if (checked) next.add(key)
+  else next.delete(key)
+  // 固定顺序，避免勾选顺序影响导出结果
+  const ordered = nodeOutputs.value.map((o) => o.key).filter((k) => next.has(k))
+  patch('outputs', ordered)
+}
 </script>
 
 <template>
@@ -131,6 +174,51 @@ function nicPatch(i, key, value) {
             @input="patch(f.key, $event.target.value)"
           />
           <input v-else :value="node.data[f.key]" @input="patch(f.key, $event.target.value)" />
+        </div>
+
+        <div v-if="node.type === 'Instance'" class="section">
+          <div class="section-title">{{ t('inspector.systemDiskTitle') }}</div>
+          <div class="rule">
+            <div class="rule-row">
+              <select :value="systemDisk.type" @change="systemDiskPatch('type', $event.target.value)">
+                <option v-for="o in diskOptions" :key="o.value" :value="o.value">{{ tl(o.label) }}</option>
+              </select>
+              <input
+                :placeholder="t('inspector.diskSizePlaceholder')"
+                :value="systemDisk.size"
+                @input="systemDiskPatch('size', $event.target.value)"
+              />
+            </div>
+          </div>
+
+          <div class="section-title">{{ t('inspector.dataDiskTitle') }}</div>
+          <div v-for="(disk, i) in node.data.dataDisks || []" :key="i" class="rule">
+            <div class="rule-row">
+              <select :value="disk.type" @change="dataDiskPatch(i, 'type', $event.target.value)">
+                <option v-for="o in diskOptions" :key="o.value" :value="o.value">{{ tl(o.label) }}</option>
+              </select>
+              <input
+                :placeholder="t('inspector.diskSizePlaceholder')"
+                :value="disk.size"
+                @input="dataDiskPatch(i, 'size', $event.target.value)"
+              />
+            </div>
+            <button class="mini danger" @click="removeDataDisk(i)">{{ t('common.delete') }}</button>
+          </div>
+          <button class="add" @click="addDataDisk">{{ t('inspector.addDataDisk') }}</button>
+        </div>
+
+        <div v-if="nodeOutputs.length" class="section">
+          <div class="section-title">{{ t('inspector.outputsTitle') }}</div>
+          <p class="section-hint">{{ t('inspector.outputsHint') }}</p>
+          <label v-for="o in nodeOutputs" :key="o.key" class="output-option">
+            <input
+              type="checkbox"
+              :checked="selectedOutputs.includes(o.key)"
+              @change="toggleOutput(o.key, $event.target.checked)"
+            />
+            {{ tl(o.label) }}
+          </label>
         </div>
 
         <div v-if="node.type === 'Host'" class="section">
@@ -278,6 +366,23 @@ function nicPatch(i, key, value) {
   font-size: 12px;
   font-weight: 700;
   margin-bottom: 8px;
+}
+.section-hint {
+  margin: 0 0 8px;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--text-dim);
+}
+.output-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  padding: 4px 0;
+  cursor: pointer;
+}
+.output-option input {
+  width: auto;
 }
 .rule {
   background: var(--panel-2);

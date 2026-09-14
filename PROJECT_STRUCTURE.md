@@ -25,6 +25,8 @@ OVN-Designer/
     │   ├── vendors.js         # 云厂商列表 + 资源名/徽标按厂商解析
     │   ├── regions.js         # 各云厂商地域列表与默认地域
     │   ├── chargeTypes.js     # 各云厂商实例计费方式（包年包月/按量付费/抢占式）
+    │   ├── disks.js           # 各云厂商云盘类型（系统盘/数据盘）
+    │   ├── outputs.js         # 云资源「创建后可获取」属性（资源 ID/公网 IP）
     │   ├── images.js          # 各云厂商本地内置镜像列表（在线清单兜底）
     │   └── instanceTypes.js   # 各云厂商本地内置实例规格列表（在线清单兜底）
     ├── store/
@@ -47,6 +49,7 @@ OVN-Designer/
     │   ├── ovn.js             # exportOvn(nodes, edges) -> {targets, all}（按执行节点拆分）
     │   └── terraform/
     │       ├── common.js      # 云资源导出共享上下文（命名/引用/VPC解析/下一跳）
+    │       ├── outputs.js     # buildOutputs：生成 output.tf（创建后可获取属性）
     │       ├── index.js       # exportTerraform(nodes, edges, vendor) 按厂商分发
     │       ├── aliyun.js      # 阿里云 Terraform 导出
     │       ├── aws.js         # AWS Terraform 导出
@@ -79,7 +82,7 @@ OVN-Designer/
 | Gateway         | cloud   | `name`（NAT 网关）                                 |
 | Eip             | cloud   | `name`, `bandwidth`, `internetChargeType`(payByTraffic/payByBandwidth) |
 | SecurityGroup   | cloud   | `name`, `rules[]`                                  |
-| Instance        | cloud   | `name`, `imageId`, `instanceType`, `chargeType`(subscription/payAsYouGo/spot), `privateIp`, `loginType`(keyPair/password), `keyPair`, `password` |
+| Instance        | cloud   | `name`, `imageId`, `instanceType`, `chargeType`(subscription/payAsYouGo/spot), `privateIp`, `loginType`(keyPair/password), `keyPair`, `password`, `systemDisk{type,size}`, `dataDisks[{type,size}]` |
 | RouteTable      | cloud   | `name`, `routes[]`                                 |
 | Interconnect    | cloud   | `name`（VPC 对等连接，连接多个 VPC）               |
 
@@ -113,9 +116,16 @@ OVN-Designer/
   以 `images.js` / `instanceTypes.js` 的本地内置清单为基底，按 `value` 合并在线清单（同项在线覆盖）。
   在线来源通过构建时环境变量注入：`VITE_CATALOG_URL`（远程 JSON）优先，其次 `VITE_CATALOG_API_URL`
   （厂商 API 代理，支持 `{vendor}` / `{kind}` 占位符），配置见 `.env.example`；拉取失败时自动回退本地。
+- Instance 的「系统盘/数据盘」在编辑弹窗中配置：系统盘类型按厂商从 `disks.js` 下拉选择，容量单位 GiB；
+  数据盘为可增删列表。导出时映射为各厂商字段（阿里云 `system_disk_category` + `data_disks`，
+  腾讯云/华为云 `system_disk_type` + `data_disks`，AWS `root_block_device` + `ebs_block_device`）。
 - `Interconnect` 节点表示 VPC 对等连接：`VPC → Interconnect` 可连多个 VPC；导出时按两两全互联生成对等连接
   （`alicloud_vpc_peer_connection` / `tencentcloud_vpc_peering_connection` / `aws_vpc_peering_connection` /
   `huaweicloud_vpc_peering_connection`），并为每个接入 VPC 已有的 `RouteTable` 自动补一条指向该对等连接的路由条目。
+- 云资源节点可勾选「创建后可获取」的属性（资源 ID；Eip/Instance 另有公网 IP）存于 `data.outputs`：
+  选项来自 `data/outputs.js`（按厂商映射只读属性名），在 `NodeEditorDialog` 的「导出输出」分区勾选。
+  导出时 `export/terraform/outputs.js` 的 `buildOutputs` 生成 `output` 块，多文件导出中追加 `output.tf`；
+  无任何勾选则不生成该文件。
 - 节点属性编辑在 `NodeEditorDialog` 弹窗中完成：双击节点或点击右侧面板的「编辑」打开；
   `Inspector` 仅显示只读摘要与编辑/删除按钮。
 

@@ -1,5 +1,6 @@
-import { createCloudContext, resolveNextHopNode, parsePortRange, resolveVpcRegion, resolveZone, instanceLoginAuth, collectKeyPairs, resolveInterconnects, routeTablesOfVpc, tlsKeyBlocks, hclLines, clean } from './common.js'
+import { createCloudContext, resolveNextHopNode, parsePortRange, resolveVpcRegion, resolveZone, instanceLoginAuth, collectKeyPairs, resolveInterconnects, routeTablesOfVpc, tlsKeyBlocks, hclLines, systemDiskConfig, dataDiskConfigs, clean } from './common.js'
 import { translate } from '../../i18n/index.js'
+import { buildOutputs } from './outputs.js'
 
 const tt = (key) => translate(`export.${key}`)
 
@@ -186,12 +187,15 @@ ${tlsKeyBlocks(keyName, resName)}`)
     const sgs = ctx.targetNodes(inst.id).filter((n) => n.type === 'SecurityGroup')
     const sgNames = sgs.map((s) => `"${clean(s.data.name)}"`)
     const auth = instanceLoginAuth(inst.data)
+    const sysDisk = systemDiskConfig(inst.data, 'GPSSD')
+    const dataDisks = dataDiskConfigs(inst.data, 'GPSSD')
     const rows = [
       ['name', `"${clean(inst.data.name)}"`],
       huaweiImageRow(inst.data.imageId),
       ['flavor_id', `"${inst.data.instanceType}"`],
       ...huaweiChargeRows(inst.data.chargeType),
-      ['system_disk_size', '40'],
+      ['system_disk_type', `"${sysDisk.type}"`],
+      ['system_disk_size', String(sysDisk.size)],
     ]
     if (auth.value) {
       if (auth.type === 'password') {
@@ -202,8 +206,19 @@ ${tlsKeyBlocks(keyName, resName)}`)
       }
     }
     if (sgNames.length) rows.push(['security_groups', `[${sgNames.join(', ')}]`])
+    const dataDiskBlock = dataDisks.length
+      ? '\n\n' +
+        dataDisks
+          .map(
+            (d) => `  data_disks {
+    type = "${d.type}"
+    size = ${d.size}
+  }`
+          )
+          .join('\n')
+      : ''
     blocks.push(`resource "huaweicloud_compute_instance" "${ctx.name(inst)}" {
-${hclLines(rows)}
+${hclLines(rows)}${dataDiskBlock}
 
   network {
     uuid        = ${subRef}
@@ -272,5 +287,6 @@ ${hclLines(rows)}
     provider: providerBlock(),
     variables: variablesBlock(region),
     main: blocks.join('\n\n') + '\n',
+    outputs: buildOutputs(ctx, nodes, 'huawei'),
   }
 }

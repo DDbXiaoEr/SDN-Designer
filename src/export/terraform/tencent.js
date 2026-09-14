@@ -1,5 +1,6 @@
-import { createCloudContext, resolveNextHopNode, resolveVpcRegion, resolveZone, instanceLoginAuth, collectKeyPairs, resolveInterconnects, routeTablesOfVpc, tlsKeyBlocks, hclLines, clean } from './common.js'
+import { createCloudContext, resolveNextHopNode, resolveVpcRegion, resolveZone, instanceLoginAuth, collectKeyPairs, resolveInterconnects, routeTablesOfVpc, tlsKeyBlocks, hclLines, systemDiskConfig, dataDiskConfigs, clean } from './common.js'
 import { translate } from '../../i18n/index.js'
+import { buildOutputs } from './outputs.js'
 
 const tt = (key) => translate(`export.${key}`)
 
@@ -175,6 +176,8 @@ ${tlsKeyBlocks(keyName, resName)}`)
     const sgs = ctx.targetNodes(inst.id).filter((n) => n.type === 'SecurityGroup')
     const sgRefs = sgs.map((s) => ref(s) + '.id')
     const auth = instanceLoginAuth(inst.data)
+    const sysDisk = systemDiskConfig(inst.data, 'CLOUD_PREMIUM')
+    const dataDisks = dataDiskConfigs(inst.data, 'CLOUD_PREMIUM')
     const rows = [
       ['instance_name', `"${clean(inst.data.name)}"`],
       ['image_id', `"${inst.data.imageId}"`],
@@ -183,7 +186,8 @@ ${tlsKeyBlocks(keyName, resName)}`)
       ['vpc_id', vpcRef],
       ['subnet_id', subRef],
       ['private_ip', `"${inst.data.privateIp}"`],
-      ['system_disk_size', '40'],
+      ['system_disk_type', `"${sysDisk.type}"`],
+      ['system_disk_size', String(sysDisk.size)],
     ]
     if (sgRefs.length) rows.push(['security_groups', `[${sgRefs.join(', ')}]`])
     if (auth.value) {
@@ -194,8 +198,19 @@ ${tlsKeyBlocks(keyName, resName)}`)
         rows.push(['key_ids', `[tencentcloud_key_pair.${resName}.id]`])
       }
     }
+    const dataDiskBlock = dataDisks.length
+      ? '\n\n' +
+        dataDisks
+          .map(
+            (d) => `  data_disks {
+    data_disk_type = "${d.type}"
+    data_disk_size = ${d.size}
+  }`
+          )
+          .join('\n')
+      : ''
     blocks.push(`resource "tencentcloud_instance" "${ctx.name(inst)}" {
-${hclLines(rows)}
+${hclLines(rows)}${dataDiskBlock}
 }`)
   }
 
@@ -261,5 +276,6 @@ ${hclLines(rows)}
     provider: providerBlock(),
     variables: variablesBlock(region),
     main: blocks.join('\n\n') + '\n',
+    outputs: buildOutputs(ctx, nodes, 'tencent'),
   }
 }

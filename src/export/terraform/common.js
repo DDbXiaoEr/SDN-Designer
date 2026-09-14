@@ -183,6 +183,29 @@ export function instanceLoginAuth(data) {
   return { type: 'keyPair', value: (data && data.keyPair) || '' }
 }
 
+// 系统盘配置：类型回退到厂商默认，容量回退到 40 GiB
+export function systemDiskConfig(data, fallbackType) {
+  const d = (data && data.systemDisk) || {}
+  const size = Number(d.size)
+  return {
+    type: clean(d.type) || fallbackType,
+    size: Number.isFinite(size) && size > 0 ? size : 40,
+  }
+}
+
+// 数据盘配置列表：忽略容量非法或为 0 的条目
+export function dataDiskConfigs(data, fallbackType) {
+  return ((data && data.dataDisks) || [])
+    .map((d) => {
+      const size = Number(d.size)
+      return {
+        type: clean(d.type) || fallbackType,
+        size: Number.isFinite(size) && size > 0 ? size : 0,
+      }
+    })
+    .filter((d) => d.size > 0)
+}
+
 // 解析端口区间，返回 { from, to }；icmp/all 返回 null
 export function parsePortRange(port, protocol) {
   if (protocol === 'icmp' || protocol === 'all') return null

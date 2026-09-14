@@ -19,7 +19,7 @@ npm run preview    # 预览生产构建
 ## 编码约定
 
 - Vue 3 组合式 API + `<script setup>`；保持现有代码风格与命名。
-- **不要添加任何注释**，除非用户明确要求。
+- **为关键逻辑添加简洁注释**：新增/修改的功能、易混淆的取值与边界处理应加注释说明意图；注释与说明文字使用中文，避免无意义的逐行复述。
 - **不要主动提交代码**，仅在用户明确要求时提交。
 - 新增节点类型 → 在 `src/data/nodeDefinitions.js` 添加 `NODE_TYPES` 记录 + `CONNECTION_RULES` + 双语 i18n 文案。
 - 所有 UI 文案走 vue-i18n（`useI18n().t` / `translate()`），同时更新 `zh-CN.js` 与 `en-US.js`。

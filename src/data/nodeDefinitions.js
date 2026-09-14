@@ -3,6 +3,7 @@
 
 import { defaultRegion, defaultZone, regionOptions } from './regions.js'
 import { chargeTypeOptions, defaultChargeType } from './chargeTypes.js'
+import { defaultDiskType } from './disks.js'
 import { imageOptions, defaultImage, instanceTypeOptions, defaultInstanceType } from '../store/catalog.js'
 
 export const CATEGORIES = {
@@ -209,6 +210,8 @@ export const NODE_TYPES = {
       loginType: 'keyPair',
       keyPair: '',
       password: '',
+      systemDisk: { type: defaultDiskType(vendor), size: 40 },
+      dataDisks: [],
     }),
     fields: [
       { key: 'name', label: 'fields.name', type: 'text' },
@@ -233,10 +236,16 @@ export const NODE_TYPES = {
       { key: 'keyPair', label: 'fields.keyPair', type: 'text', when: (d) => d.loginType !== 'password' },
       { key: 'password', label: 'fields.password', type: 'password', when: (d) => d.loginType === 'password' },
     ],
-    summary: (d) => [
-      ['summary.ip', d.privateIp],
-      ['summary.spec', d.instanceType],
-    ],
+    summary: (d) => {
+      const disk = d.systemDisk || {}
+      const sys = Number(disk.size) > 0 ? Number(disk.size) : 40
+      const dataCount = (d.dataDisks || []).filter((x) => Number(x.size) > 0).length
+      return [
+        ['summary.ip', d.privateIp],
+        ['summary.spec', d.instanceType],
+        ['summary.disk', dataCount ? `${sys} + ${dataCount}` : String(sys)],
+      ]
+    },
   },
   RouteTable: {
     category: 'cloud',

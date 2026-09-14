@@ -1,5 +1,6 @@
-import { createCloudContext, resolveNextHopNode, parsePortRange, resolveVpcRegion, resolveZone, instanceLoginAuth, collectKeyPairs, resolveInterconnects, routeTablesOfVpc, tlsKeyBlocks, clean } from './common.js'
+import { createCloudContext, resolveNextHopNode, parsePortRange, resolveVpcRegion, resolveZone, instanceLoginAuth, collectKeyPairs, resolveInterconnects, routeTablesOfVpc, tlsKeyBlocks, systemDiskConfig, dataDiskConfigs, clean } from './common.js'
 import { translate } from '../../i18n/index.js'
+import { buildOutputs } from './outputs.js'
 
 const tt = (key) => translate(`export.${key}`)
 
@@ -188,6 +189,20 @@ ${tlsKeyBlocks(keyName, resName)}`)
       inst.data.chargeType === 'spot'
         ? `\n\n  instance_market_options {\n    market_type = "spot"\n  }`
         : ''
+    const sysDisk = systemDiskConfig(inst.data, 'gp3')
+    const dataDisks = dataDiskConfigs(inst.data, 'gp3')
+    const dataDiskBlock = dataDisks.length
+      ? '\n' +
+        dataDisks
+          .map(
+            (d, i) => `\n  ebs_block_device {
+    device_name = "/dev/sd${String.fromCharCode(98 + i)}"
+    volume_type = "${d.type}"
+    volume_size = ${d.size}
+  }`
+          )
+          .join('')
+      : ''
     blocks.push(`resource "aws_instance" "${ctx.name(inst)}" {
   ami           = "${inst.data.imageId}"
   instance_type = "${inst.data.instanceType}"
@@ -195,8 +210,9 @@ ${tlsKeyBlocks(keyName, resName)}`)
   private_ip    = "${inst.data.privateIp}"${authLine}${marketLine}
 
   root_block_device {
-    volume_size = 40
-  }
+    volume_type = "${sysDisk.type}"
+    volume_size = ${sysDisk.size}
+  }${dataDiskBlock}
 
   tags = {
     Name = "${clean(inst.data.name)}"
@@ -260,5 +276,6 @@ ${hopLine}
     provider: providerBlock(),
     variables: variablesBlock(region),
     main: blocks.join('\n\n') + '\n',
+    outputs: buildOutputs(ctx, nodes, 'aws'),
   }
 }
