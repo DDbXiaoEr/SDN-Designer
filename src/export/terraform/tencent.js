@@ -1,4 +1,4 @@
-import { createCloudContext, resolveNextHopNode, resolveVpcRegion, resolveZone, instanceLoginAuth, resolveInstanceKeyPair, collectKeyPairs, collectExistingKeyPairs, escapeRegex, resolveInterconnects, routeTablesOfVpc, tlsKeyBlocks, hclLines, systemDiskConfig, dataDiskConfigs, clean } from './common.js'
+import { createCloudContext, resolveNextHopNode, parsePortRange, resolveVpcRegion, resolveZone, instanceLoginAuth, resolveInstanceKeyPair, collectKeyPairs, collectExistingKeyPairs, escapeRegex, resolveInterconnects, routeTablesOfVpc, tlsKeyBlocks, hclLines, systemDiskConfig, dataDiskConfigs, clean } from './common.js'
 import { translate } from '../../i18n/index.js'
 import { buildOutputs } from './outputs.js'
 
@@ -67,6 +67,17 @@ function tcProtocol(protocol) {
   return protocol.toUpperCase()
 }
 
+// 腾讯云 port_range 语义：单端口 "22"、多端口 "80,443"、范围 "80-90"；
+// 内部统一存 "起始/结束"，故起止相同输出单值，否则输出 "起-止"。
+function tcPortRange(rule) {
+  if (rule.protocol === 'icmp' || rule.protocol === 'all') return 'ALL'
+  const raw = String(rule.port || '').trim()
+  if (raw.includes(',')) return raw
+  const port = parsePortRange(rule.port, rule.protocol)
+  if (!port) return 'ALL'
+  return port.from === port.to ? String(port.from) : `${port.from}-${port.to}`
+}
+
 function tencentChargeRows(chargeType) {
   if (chargeType === 'subscription') {
     return [
@@ -113,7 +124,7 @@ export function exportTencentTerraform(nodes, edges, providerVersion) {
   name = "${clean(sg.data.name)}"
 }`)
     ;(sg.data.rules || []).forEach((rule, i) => {
-      const portRange = rule.protocol === 'icmp' || rule.protocol === 'all' ? 'ALL' : rule.port
+      const portRange = tcPortRange(rule)
       blocks.push(`resource "tencentcloud_security_group_rule" "${ctx.name(sg)}_${rule.direction}_${i}" {
   security_group_id = ${ref(sg)}.id
   type              = "${rule.direction}"
@@ -187,6 +198,8 @@ ${tlsKeyBlocks(keyName, resName)}`)
     const kp = resolveInstanceKeyPair(ctx, inst)
     const sysDisk = systemDiskConfig(inst.data, 'CLOUD_PREMIUM')
     const dataDisks = dataDiskConfigs(inst.data, 'CLOUD_PREMIUM')
+    // 腾讯云实例必须指定可用区，优先从关联子网的可用区推导（与子网保持一致）
+    const az = resolveZone(sub?.data.zone, vpc?.data.region || region, 'tencent')
     const rows = [
       ['instance_name', `"${clean(inst.data.name)}"`],
       ['image_id', `"${inst.data.imageId}"`],
@@ -194,6 +207,7 @@ ${tlsKeyBlocks(keyName, resName)}`)
       ...tencentChargeRows(inst.data.chargeType),
       ['vpc_id', vpcRef],
       ['subnet_id', subRef],
+      ['availability_zone', `"${az}"`],
       ['private_ip', `"${inst.data.privateIp}"`],
       ['system_disk_type', `"${sysDisk.type}"`],
       ['system_disk_size', String(sysDisk.size)],
