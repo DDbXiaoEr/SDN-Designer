@@ -212,7 +212,7 @@ ${tlsKeyBlocks(keyName, resName)}`)
       ['system_disk_type', `"${sysDisk.type}"`],
       ['system_disk_size', String(sysDisk.size)],
     ]
-    if (sgRefs.length) rows.push(['security_groups', `[${sgRefs.join(', ')}]`])
+    if (sgRefs.length) rows.push(['orderly_security_groups', `[${sgRefs.join(', ')}]`])
     if (kp) {
       // 新建密钥对引用生成的资源；关联现有密钥对通过 data source 查询 ID
       if (kp.mode === 'create') {

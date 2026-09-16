@@ -18,9 +18,16 @@ OVN-Designer/
 ├── .env.example               # 在线清单环境变量示例（VITE_CATALOG_*）
 ├── README.md / README.en.md   # 中英文说明
 ├── PROJECT_STRUCTURE.md       # 本文件：目录结构与数据模型
+├── server/                    # Go + Gin 在线清单服务（云厂商 AK/SK 代理，独立模块）
+│   ├── main.go                # 入口：Gin 路由 / CORS / 优雅退出
+│   ├── internal/config/       # 配置：YAML 文件（环境变量可覆盖，密钥全部可配置）
+│   ├── internal/catalog/      # Item/Provider 抽象、TTL 缓存、HTTP 接口
+│   ├── internal/provider/     # 腾讯/阿里/AWS/华为实现 + mock + 注册表
+│   ├── config.example.yaml    # 服务配置示例（复制为 config.yaml）
+│   └── README.md              # 接口与运行说明
 └── src/
     ├── main.js                # 应用入口：createApp(App).use(i18n).mount('#app')
-    ├── App.vue                # 主编排：画布、拖拽、连线校验、示例加载、保存/导入、导出、创建对话框
+    ├── App.vue                # 主编排：画布、拖拽、连线校验（含可用区库存提示 toast）、示例加载、保存/导入、导出、创建对话框
     ├── styles/
     │   └── main.css           # 全局 CSS 变量（主题色）与基础样式
     ├── data/
@@ -121,10 +128,25 @@ OVN-Designer/
   导出时映射为各厂商字段（如阿里云 `instance_charge_type` + `spot_strategy`，腾讯云 `instance_charge_type`，华为云 `charging_mode`，AWS `instance_market_options`）。
 - 独立 `Eip` 节点表示公网 IP；`Eip → Instance` 连线表示绑定到该实例，导出为厂商绑定资源
   （`alicloud_eip_association` / `tencentcloud_eip_association` / `huaweicloud_compute_eip_associate` / `aws_eip_association`）。
-- Instance 的「镜像」与「实例规格」为可编辑下拉（input + datalist），清单来自 `store/catalog.js`：
+- Instance 的「镜像」与「实例规格」为「下拉 + 可手输」控件（`combo` 字段：`select` 列出全部候选 + 「自定义…」项，
+  选中后显示文本框手输；当前值不在候选列表时自动进入自定义），清单来自 `store/catalog.js`：
   以 `images.js` / `instanceTypes.js` 的本地内置清单为基底，按 `value` 合并在线清单（同项在线覆盖）。
   在线来源通过构建时环境变量注入：`VITE_CATALOG_URL`（远程 JSON）优先，其次 `VITE_CATALOG_API_URL`
   （厂商 API 代理，支持 `{vendor}` / `{kind}` 占位符），配置见 `.env.example`；拉取失败时自动回退本地。
+  代理服务见 `server/`（Go + Gin）：`GET /api/:kind/:vendor[/:region]` 用厂商 AK/SK 签名调用
+  `DescribeImages` / `DescribeInstanceTypes`（腾讯云另有可用区库存 `zones`），未配置密钥的厂商返回 501；
+  密钥等配置在 `server/config.yaml`（YAML，环境变量可覆盖），`server/config.example.yaml` 为示例，
+  `mock: true` 可无凭证联调。
+- 规格条目可带 `zones`（该规格有货的完整可用区 ID 列表，缺省表示不限制），`catalog.js` 归一化时保留，
+  并导出 `instanceTypeZones(vendor, type)`；本地 `instanceTypes.js` 仅对腾讯云 SA3 系列标注
+  `ap-guangzhou-5/6/7` 作为示例，真实库存由在线清单提供。
+- 腾讯云 CVM 必须与子网同可用区，故「库存」约束作用在 `Subnet.zone`（部署可用区）上，
+  判定统一由 `common.js` 的 `validateInstanceZones(nodes, edges, vendor, zonesOf)` 提供（返回项含 `subnetId`、`sameRegion`）：
+  - 连线 `Subnet → Instance` 时，`App.vue` 的 `onConnect` 立即校验并弹出轻量提示（`toast`），
+    带「子网改用某可用区」快捷动作；
+  - 编辑 `Subnet` 时，「可用区库存」分区列出该子网下规格无货的实例，并给出一键改可用区按钮；
+  - 编辑 `Instance` 时，若其规格不在所属子网可用区有货，给出同类提示；
+  - 导出时汇总为 warning（不影响 Terraform 内容）。
 - Instance 的「系统盘/数据盘」在编辑弹窗中配置：系统盘类型按厂商从 `disks.js` 下拉选择，容量单位 GiB；
   数据盘为可增删列表。导出时映射为各厂商字段（阿里云 `system_disk_category` + `data_disks`，
   腾讯云/华为云 `system_disk_type` + `data_disks`，AWS `root_block_device` + `ebs_block_device`）。

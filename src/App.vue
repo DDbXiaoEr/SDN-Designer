@@ -11,7 +11,8 @@ import { createDemoDesign } from './data/demo.js'
 import { createDesigner, nextId } from './store/designer.js'
 import { exportOvn } from './export/ovn.js'
 import { exportTerraform } from './export/terraform/index.js'
-import { validateZones } from './export/terraform/common.js'
+import { validateZones, validateInstanceZones } from './export/terraform/common.js'
+import { instanceTypeZones } from './store/catalog.js'
 import { download } from './export/utils.js'
 import { serializeDesign, deserializeDesign, loadFromStorage } from './store/persistence.js'
 import { vendor, providerVersion } from './store/vendor.js'
@@ -28,7 +29,7 @@ import '@vue-flow/minimap/dist/style.css'
 import '@vue-flow/controls/dist/style.css'
 
 const designer = createDesigner()
-const { vf, selectedId, nodes, edges, addNode, removeEdge, clear, recomputeClusters } = designer
+const { vf, selectedId, nodes, edges, addNode, removeEdge, updateNodeData, clear, recomputeClusters } = designer
 const { screenToFlowCoordinate } = vf
 const { t } = useI18n()
 
@@ -38,6 +39,29 @@ const editorOpen = ref(false)
 const editorNodeId = ref(null)
 const pendingDropPosition = ref(null)
 const fileInput = ref(null)
+
+// 实例规格可用区库存判定：连线时与导出/子网编辑校验共用同一逻辑
+function stockIssues(edgesArg) {
+  return validateInstanceZones(nodes.value, edgesArg || edges.value, vendor.value, (type) =>
+    instanceTypeZones(vendor.value, type)
+  )
+}
+
+// 轻量提示（连线时的库存告警），支持一个快捷修正动作，8 秒后自动消失
+const toast = ref(null)
+let toastTimer = null
+function showToast(message, action) {
+  toast.value = { message, action: action || null }
+  if (toastTimer) clearTimeout(toastTimer)
+  toastTimer = setTimeout(() => {
+    toast.value = null
+  }, 8000)
+}
+function runToastAction() {
+  const action = toast.value && toast.value.action
+  toast.value = null
+  if (action) action.run()
+}
 
 // 载入内置示例拓扑；边标签按当前语言从连接规则解析
 function applyDemo() {
@@ -114,6 +138,38 @@ function onConnect(conn) {
   ])
   if (source.type === 'Host' && target.type === 'Host') {
     recomputeClusters()
+  }
+  // 云主机接入子网即确定了部署可用区，立即校验规格在该可用区是否有货
+  if (source.type === 'Subnet' && target.type === 'Instance') {
+    const issue = stockIssues([
+      ...edges.value,
+      { id: '_pending', source: conn.source, target: conn.target },
+    ]).find((it) => it.nodeId === target.id)
+    if (issue) {
+      const zones = issue.sameRegion || []
+      if (zones.length) {
+        showToast(
+          t('export.instanceZoneUnavailable', {
+            instance: issue.name,
+            type: issue.type,
+            zone: issue.zone,
+            zones: zones.join(', '),
+          }),
+          {
+            label: t('inspector.changeSubnetZone', { zone: zones[0] }),
+            run: () => updateNodeData(source.id, { zone: zones[0] }),
+          }
+        )
+      } else {
+        showToast(
+          t('export.instanceZoneRegionUnavailable', {
+            instance: issue.name,
+            type: issue.type,
+            region: issue.region,
+          })
+        )
+      }
+    }
   }
 }
 
@@ -214,6 +270,28 @@ function showTerraform() {
       expected: issue.expected,
     })
   )
+  // 实例规格可用区库存：有货可选在同地域时提示可切换的可用区，否则需更换规格/地域
+  validateInstanceZones(
+    nodes.value,
+    edges.value,
+    vendor.value,
+    (type) => instanceTypeZones(vendor.value, type)
+  ).forEach((issue) => {
+    warnings.push(
+      issue.sameRegion.length
+        ? t('export.instanceZoneUnavailable', {
+            instance: issue.name,
+            type: issue.type,
+            zone: issue.zone,
+            zones: issue.sameRegion.join(', '),
+          })
+        : t('export.instanceZoneRegionUnavailable', {
+            instance: issue.name,
+            type: issue.type,
+            region: issue.region,
+          })
+    )
+  })
   exportModal.value = {
     title: t('export.terraformTitle', { vendor: t(`vendors.${vendor.value}`) }),
     groups: files.map((f) => ({
@@ -303,6 +381,14 @@ const nodesCount = computed(() => nodes.value.length)
       style="display: none"
       @change="importDesign"
     />
+
+    <div v-if="toast" class="toast">
+      <span class="toast-msg">{{ toast.message }}</span>
+      <button v-if="toast.action" class="toast-action" @click="runToastAction">
+        {{ toast.action.label }}
+      </button>
+      <button class="toast-close" @click="toast = null">×</button>
+    </div>
   </div>
 </template>
 
@@ -346,5 +432,42 @@ const nodesCount = computed(() => nodes.value.length)
 }
 :deep(.vue-flow__minimap) {
   background: var(--panel);
+}
+.toast {
+  position: fixed;
+  left: 50%;
+  bottom: 24px;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  max-width: min(720px, 92vw);
+  padding: 10px 14px;
+  background: var(--panel);
+  border: 1px solid var(--danger);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  z-index: 200;
+}
+.toast-msg {
+  font-size: 12px;
+  line-height: 1.5;
+}
+.toast-action {
+  flex-shrink: 0;
+  border: 1px solid var(--accent);
+  color: var(--accent);
+  background: transparent;
+  border-radius: 6px;
+  padding: 5px 10px;
+  font-size: 12px;
+}
+.toast-close {
+  flex-shrink: 0;
+  border: none;
+  background: transparent;
+  color: var(--text-dim);
+  font-size: 16px;
+  line-height: 1;
 }
 </style>

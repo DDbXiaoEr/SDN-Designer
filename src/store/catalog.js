@@ -16,7 +16,12 @@ function normalizeItems(items) {
       if (typeof it === 'string') return { value: it, label: it }
       const value = it.value ?? it.id ?? it.name
       if (value == null) return null
-      return { value: String(value), label: it.label != null ? String(it.label) : String(value) }
+      const item = { value: String(value), label: it.label != null ? String(it.label) : String(value) }
+      // 可用区库存：完整 AZ ID 列表；仅部分规格提供，缺省表示不限制
+      if (Array.isArray(it.zones) && it.zones.length) {
+        item.zones = it.zones.map((z) => String(z))
+      }
+      return item
     })
     .filter(Boolean)
 }
@@ -78,6 +83,12 @@ export function imageOptions(vendor) {
 export function instanceTypeOptions(vendor) {
   const map = instanceTypesByVendor.value
   return map[vendor] || map[FALLBACK_VENDOR] || []
+}
+
+// 规格的有货可用区列表（完整 AZ ID）；返回空数组表示该规格不受可用区限制
+export function instanceTypeZones(vendor, type) {
+  const item = instanceTypeOptions(vendor).find((o) => o.value === type)
+  return item && Array.isArray(item.zones) ? item.zones : []
 }
 
 export function defaultImage(vendor) {

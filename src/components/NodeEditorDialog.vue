@@ -1,5 +1,5 @@
 <script setup>
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { NODE_TYPES } from '../data/nodeDefinitions.js'
 import { diskTypeOptions, defaultDiskType } from '../data/disks.js'
@@ -7,6 +7,8 @@ import { outputOptions } from '../data/outputs.js'
 import { nodeLabelKey } from '../data/vendors.js'
 import { vendor } from '../store/vendor.js'
 import { useDesigner } from '../store/designer.js'
+import { instanceTypeZones } from '../store/catalog.js'
+import { resolveZone, validateInstanceZones } from '../export/terraform/common.js'
 
 const props = defineProps({
   nodeId: { type: String, required: true },
@@ -27,6 +29,55 @@ const hasKeyPairNode = computed(() => {
     const target = nodes.value.find((n) => n.id === e.target)
     return target && target.type === 'KeyPair'
   })
+})
+
+// 从连线中找指向 nodeId 的指定类型源节点（如 Subnet -> Instance、VPC -> Subnet）
+function sourceNodeOf(nodeId, type) {
+  for (const e of edges.value) {
+    if (e.target !== nodeId) continue
+    const src = nodes.value.find((n) => n.id === e.source)
+    if (src && src.type === type) return src
+  }
+  return null
+}
+
+// 实例关联的子网（Subnet -> Instance）及其所属 VPC（VPC -> Subnet）
+const instanceSubnet = computed(() =>
+  node.value && node.value.type === 'Instance' ? sourceNodeOf(node.value.id, 'Subnet') : null
+)
+const instanceVpc = computed(() =>
+  instanceSubnet.value ? sourceNodeOf(instanceSubnet.value.id, 'VPC') : null
+)
+
+// 可用区库存校验：腾讯云 CVM 必须与子网同可用区，故提示需改子网可用区而非实例
+const instanceZoneCheck = computed(() => {
+  if (!node.value || node.value.type !== 'Instance') return null
+  const type = node.value.data.instanceType
+  const zones = instanceTypeZones(vendor.value, type)
+  if (!zones.length) return null
+  const subnet = instanceSubnet.value
+  if (!subnet) return { state: 'noSubnet', type }
+  const region = (instanceVpc.value && instanceVpc.value.data.region) || ''
+  const rawZone = String(subnet.data.zone || '').trim()
+  if (!region || !rawZone) return null
+  const az = resolveZone(rawZone, region, vendor.value)
+  if (zones.includes(az)) return null
+  const sameRegion = zones.filter((z) => z === resolveZone(z, region, vendor.value))
+  return sameRegion.length
+    ? { state: 'zoneUnavailable', type, zone: az, sameRegion }
+    : { state: 'regionUnavailable', type, region }
+})
+
+function applySubnetZone(zone) {
+  if (instanceSubnet.value) updateNodeData(instanceSubnet.value.id, { zone })
+}
+
+// 子网下的实例规格库存：编辑子网可用区（部署可用区）时即时提示无货实例
+const subnetStockIssues = computed(() => {
+  if (!node.value || node.value.type !== 'Subnet') return []
+  return validateInstanceZones(nodes.value, edges.value, vendor.value, (type) =>
+    instanceTypeZones(vendor.value, type)
+  ).filter((it) => it.subnetId === node.value.id)
 })
 
 function isFieldVisible(f) {
@@ -51,6 +102,32 @@ function optionsFor(f) {
     return [{ value: cur, label: cur }, ...opts]
   }
   return opts
+}
+
+// combo 字段（镜像/实例规格）用「下拉 + 可手输」：选择列表项，或选「自定义」后手动输入
+const CUSTOM = '__custom__'
+const customMode = ref({})
+
+function comboOptions(f) {
+  return typeof f.options === 'function' ? f.options(vendor.value) : f.options || []
+}
+
+// 当前值不在候选列表中，或用户显式选择了「自定义」
+function isCustomCombo(f) {
+  if (customMode.value[f.key]) return true
+  const cur = node.value.data[f.key]
+  return cur != null && cur !== '' && !comboOptions(f).some((o) => o.value === cur)
+}
+
+function onComboSelect(f, value) {
+  if (value === CUSTOM) {
+    customMode.value = { ...customMode.value, [f.key]: true }
+    return
+  }
+  const next = { ...customMode.value }
+  delete next[f.key]
+  customMode.value = next
+  patch(f.key, value)
 }
 
 function patchController(value) {
@@ -169,14 +246,20 @@ function toggleOutput(key, checked) {
             <option v-for="o in optionsFor(f)" :key="o.value" :value="o.value">{{ tl(o.label) }}</option>
           </select>
           <template v-else-if="f.type === 'combo'">
+            <select
+              :value="isCustomCombo(f) ? CUSTOM : node.data[f.key]"
+              @change="onComboSelect(f, $event.target.value)"
+            >
+              <option v-for="o in comboOptions(f)" :key="o.value" :value="o.value">{{ tl(o.label) }}</option>
+              <option :value="CUSTOM">{{ t('common.custom') }}</option>
+            </select>
             <input
-              :list="`combo-${node.id}-${f.key}`"
+              v-if="isCustomCombo(f)"
+              class="combo-custom"
+              :placeholder="t('common.customValuePlaceholder')"
               :value="node.data[f.key]"
               @input="patch(f.key, $event.target.value)"
             />
-            <datalist :id="`combo-${node.id}-${f.key}`">
-              <option v-for="o in optionsFor(f)" :key="o.value" :value="o.value">{{ tl(o.label) }}</option>
-            </datalist>
           </template>
           <input
             v-else-if="f.type === 'checkbox'"
@@ -196,6 +279,70 @@ function toggleOutput(key, checked) {
         <p v-if="node.type === 'Instance' && hasKeyPairNode" class="section-hint">
           {{ t('inspector.keyPairFromNodeHint') }}
         </p>
+
+        <div v-if="instanceZoneCheck" class="section stock">
+          <div class="section-title">{{ t('inspector.instanceZoneTitle') }}</div>
+          <p v-if="instanceZoneCheck.state === 'noSubnet'" class="section-hint">
+            {{ t('inspector.instanceZoneNoSubnet') }}
+          </p>
+          <template v-else-if="instanceZoneCheck.state === 'zoneUnavailable'">
+            <p class="section-hint warning">
+              {{
+                t('inspector.instanceZoneUnavailable', {
+                  zone: instanceZoneCheck.zone,
+                  type: instanceZoneCheck.type,
+                  zones: instanceZoneCheck.sameRegion.join(', '),
+                })
+              }}
+            </p>
+            <button
+              v-for="z in instanceZoneCheck.sameRegion"
+              :key="z"
+              class="mini"
+              @click="applySubnetZone(z)"
+            >
+              {{ t('inspector.changeSubnetZone', { zone: z }) }}
+            </button>
+          </template>
+          <p v-else-if="instanceZoneCheck.state === 'regionUnavailable'" class="section-hint warning">
+            {{
+              t('inspector.instanceZoneRegionUnavailable', {
+                type: instanceZoneCheck.type,
+                region: instanceZoneCheck.region,
+              })
+            }}
+          </p>
+        </div>
+
+        <div v-if="subnetStockIssues.length" class="section stock">
+          <div class="section-title">{{ t('inspector.subnetStockTitle') }}</div>
+          <div v-for="issue in subnetStockIssues" :key="issue.nodeId" class="rule">
+            <p class="section-hint warning">
+              {{
+                issue.sameRegion.length
+                  ? t('inspector.subnetStockUnavailable', {
+                      instance: issue.name,
+                      type: issue.type,
+                      zone: issue.zone,
+                      zones: issue.sameRegion.join(', '),
+                    })
+                  : t('inspector.subnetStockRegionUnavailable', {
+                      instance: issue.name,
+                      type: issue.type,
+                      region: issue.region,
+                    })
+              }}
+            </p>
+            <button
+              v-for="z in issue.sameRegion"
+              :key="z"
+              class="mini"
+              @click="patch('zone', z)"
+            >
+              {{ t('inspector.changeSubnetZone', { zone: z }) }}
+            </button>
+          </div>
+        </div>
 
         <div v-if="node.type === 'Instance'" class="section">
           <div class="section-title">{{ t('inspector.systemDiskTitle') }}</div>
@@ -378,6 +525,9 @@ function toggleOutput(key, checked) {
 .field input[type='checkbox'] {
   width: auto;
 }
+.combo-custom {
+  margin-top: 6px;
+}
 .section {
   margin-top: 16px;
   border-top: 1px solid var(--border);
@@ -393,6 +543,12 @@ function toggleOutput(key, checked) {
   font-size: 11px;
   line-height: 1.5;
   color: var(--text-dim);
+}
+.section-hint.warning {
+  color: var(--danger);
+}
+.stock .mini {
+  margin: 4px 6px 0 0;
 }
 .output-option {
   display: flex;

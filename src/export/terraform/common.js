@@ -148,6 +148,39 @@ export function validateZones(nodes, edges, vendor) {
   return issues
 }
 
+// 校验实例规格是否在其所属子网的可用区有货：zonesOf(type) 返回该规格的可用区列表，
+// 返回空数组视为不限制；sameRegion 为该地域内可选的有货可用区（供提示/快捷修复）
+export function validateInstanceZones(nodes, edges, vendor, zonesOf) {
+  if (typeof zonesOf !== 'function') return []
+  const ctx = createCloudContext(nodes, edges, {})
+  const issues = []
+  for (const inst of nodes.filter((n) => n.type === 'Instance')) {
+    const zones = zonesOf(inst.data && inst.data.instanceType)
+    if (!zones || !zones.length) continue
+    const sub = ctx.findSubnet(inst)
+    const rawZone = clean(sub && sub.data && sub.data.zone)
+    if (!rawZone) continue
+    const vpc = ctx.findVpc(inst)
+    const region = clean(vpc && vpc.data && vpc.data.region)
+    const az = resolveZone(rawZone, region, vendor)
+    if (zones.includes(az)) continue
+    // 该规格在此地域是否有货：resolveZone 重写前缀后与原值相同即同地域
+    const sameRegion = region
+      ? zones.filter((z) => z === resolveZone(z, region, vendor))
+      : []
+    issues.push({
+      nodeId: inst.id,
+      subnetId: sub ? sub.id : '',
+      name: clean(inst.data.name),
+      type: clean(inst.data.instanceType),
+      zone: az,
+      region,
+      sameRegion,
+    })
+  }
+  return issues
+}
+
 // 解析实例的密钥对来源：优先取直连的 KeyPair 节点（Instance -> KeyPair），
 // 否则回退到实例内联的 keyPair 字段（兼容旧设计）；密码登录返回 null
 export function resolveInstanceKeyPair(ctx, inst) {

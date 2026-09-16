@@ -18,8 +18,9 @@ export const LOCAL_INSTANCE_TYPES = {
     { value: 'S5.LARGE8', label: 'S5.LARGE8 (2 vCPU / 8 GiB)' },
     { value: 'S6.MEDIUM4', label: 'S6.MEDIUM4 (2 vCPU / 4 GiB)' },
     { value: 'S6.LARGE8', label: 'S6.LARGE8 (2 vCPU / 8 GiB)' },
-    { value: 'SA3.MEDIUM4', label: 'SA3.MEDIUM4 (2 vCPU / 4 GiB)' },
-    { value: 'SA3.LARGE8', label: 'SA3.LARGE8 (2 vCPU / 8 GiB)' },
+    // zones：该规格有货的可用区（完整 AZ ID）。示例：SA3 系列 ap-guangzhou 仅 5/6/7 有货；缺省表示不限制
+    { value: 'SA3.MEDIUM4', label: 'SA3.MEDIUM4 (2 vCPU / 4 GiB)', zones: ['ap-guangzhou-5', 'ap-guangzhou-6', 'ap-guangzhou-7'] },
+    { value: 'SA3.LARGE8', label: 'SA3.LARGE8 (2 vCPU / 8 GiB)', zones: ['ap-guangzhou-5', 'ap-guangzhou-6', 'ap-guangzhou-7'] },
     { value: 'SA3.2LARGE8', label: 'SA3.2LARGE8 (4 vCPU / 8 GiB)' },
   ],
   aws: [
