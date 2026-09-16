@@ -1,0 +1,54 @@
+# OVN-Designer 清单服务配置
+# 使用：复制为 config.yaml 并填写密钥（config.yaml 已在 .gitignore 中忽略）。
+# 也可用 -config=/path/to/xxx.yaml 或 CONFIG_FILE 指定其它路径；
+# 环境变量可覆盖以下任意项（便于容器/CI 注入密钥，见 README）。
+#
+# 所有厂商都只需「只读」权限，请使用只读子账号，切勿授予写权限。
+
+server:
+  port: "8080"
+  # 结果缓存时长（Go duration，如 30s、10m、1h；0 表示不缓存）
+  cache_ttl: 10m
+  # 调用云厂商 API 的超时（Go duration）
+  request_timeout: 20s
+  # 允许的跨域来源；* 表示全部
+  cors_allowed_origins:
+    - "*"
+  # 无凭证联调：true 时所有厂商返回示例数据
+  mock: false
+
+vendors:
+  # 腾讯云（CVM）
+  # 所需只读 Action：cvm:DescribeImages、cvm:DescribeZoneInstanceConfigInfos
+  # 建议直接授予预设策略：QcloudCVMReadOnlyAccess
+  tencent:
+    enabled: true
+    access_key: "" # SecretId
+    secret_key: "" # SecretKey
+
+  # 阿里云（ECS）
+  # 所需只读 Action：ecs:DescribeImages、ecs:DescribeInstanceTypes、ecs:DescribeAvailableResource
+  # 建议直接授予系统策略：AliyunECSReadOnlyAccess
+  aliyun:
+    enabled: true
+    access_key: "" # AccessKeyId
+    secret_key: "" # AccessKeySecret
+
+  # AWS（EC2）
+  # 所需只读 Action（Resource 均为 *）：ec2:DescribeImages、ec2:DescribeInstanceTypes、
+  #   ec2:DescribeInstanceTypeOfferings
+  # 建议直接授予托管策略：AmazonEC2ReadOnlyAccess
+  aws:
+    enabled: true
+    access_key: "" # AccessKeyId
+    secret_key: "" # SecretAccessKey
+
+  # 华为云（镜像来自 IMS、规格来自 ECS）
+  # 所需只读 Action：ims:images:list（镜像）、ecs:flavors:list（规格）
+  # 建议授予系统策略：IMS ReadOnlyAccess + ECS ReadOnlyAccess
+  # 另需 Project ID：控制台「我的凭证 → API 凭证 → 项目 ID」，或 AK/SK 所属区域的项目 ID
+  huawei:
+    enabled: true
+    access_key: "" # AK
+    secret_key: "" # SK
+    project_id: ""

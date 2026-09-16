@@ -1,0 +1,7 @@
+config.yaml
+config.local.yaml
+.env
+/server
+/server.exe
+/bin
+*.log
