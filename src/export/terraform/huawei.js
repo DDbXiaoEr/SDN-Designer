@@ -1,4 +1,5 @@
 import { createCloudContext, resolveNextHopNode, parsePortRange, resolveVpcRegion, resolveZone, instanceLoginAuth, resolveInstanceKeyPair, collectKeyPairs, resolveInterconnects, routeTablesOfVpc, tlsKeyBlocks, hclLines, systemDiskConfig, dataDiskConfigs, clean } from './common.js'
+import { parseCidr } from '../utils.js'
 import { translate } from '../../i18n/index.js'
 import { buildOutputs } from './outputs.js'
 
@@ -66,6 +67,12 @@ function hwProtocol(protocol) {
   return protocol
 }
 
+// 计算 CIDR 子网中第一个可用 IP 地址（网关地址）
+function cidrFirstUsable(cidr) {
+  const info = parseCidr(cidr)
+  return info ? info.gateway : ''
+}
+
 // 华为云实例镜像：ID 形如 UUID 时用 image_id，否则按镜像名称使用 image_name
 function huaweiImageRow(image) {
   const value = clean(image)
@@ -109,6 +116,7 @@ export function exportHuaweiTerraform(nodes, edges, providerVersion) {
     blocks.push(`resource "huaweicloud_vpc_subnet" "${ctx.name(sub)}" {
   name              = "${clean(sub.data.name)}"
   cidr              = "${sub.data.cidr}"
+  gateway_ip        = "${sub.data.gateway || cidrFirstUsable(sub.data.cidr)}"
   vpc_id            = ${vpcRef}
   availability_zone = "${resolveZone(sub.data.zone, vpc?.data.region || region, 'huawei')}"
 }`)
@@ -124,6 +132,7 @@ export function exportHuaweiTerraform(nodes, edges, providerVersion) {
       const max = port ? port.to : 'null'
       blocks.push(`resource "huaweicloud_networking_secgroup_rule" "${ctx.name(sg)}_${rule.direction}_${i}" {
   direction         = "${rule.direction}"
+  ethertype         = "IPv4"
   protocol          = "${hwProtocol(rule.protocol)}"
   port_range_min    = ${min}
   port_range_max    = ${max}

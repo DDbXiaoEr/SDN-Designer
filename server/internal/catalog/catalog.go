@@ -4,6 +4,7 @@ package catalog
 import (
 	"context"
 	"errors"
+	"log"
 	"net/http"
 	"sort"
 	"strings"
@@ -120,6 +121,8 @@ func (h *Handler) get(c *gin.Context) {
 
 	items, err := h.load(c.Request.Context(), vendor, kind, region, provider)
 	if err != nil {
+		// 打印上游云厂商的原始响应（SDK 错误通常会带上响应体），便于定位签名/权限/参数问题
+		log.Printf("[catalog] %s/%s region=%s upstream error: %v", vendor, kind, region, err)
 		c.JSON(http.StatusBadGateway, gin.H{
 			"error":  err.Error(),
 			"vendor": vendor,
