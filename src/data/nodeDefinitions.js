@@ -307,7 +307,7 @@ export const CONNECTION_RULES = [
   { source: 'VPC', target: 'Subnet', label: 'connections.vpcToSubnet' },
   { source: 'Subnet', target: 'Instance', label: 'connections.subnetToInstance' },
   { source: 'Instance', target: 'SecurityGroup', label: 'connections.instanceToSg' },
-  { source: 'Instance', target: 'KeyPair', label: 'connections.instanceToKeyPair' },
+  { source: 'KeyPair', target: 'Instance', label: 'connections.keyPairToInstance' },
   { source: 'Eip', target: 'Instance', label: 'connections.eipToInstance' },
   { source: 'Subnet', target: 'Gateway', label: 'connections.subnetToGateway' },
   { source: 'Subnet', target: 'RouteTable', label: 'connections.subnetToRouteTable' },

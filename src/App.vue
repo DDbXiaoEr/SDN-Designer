@@ -1,6 +1,6 @@
 <script setup>
 import { ref, computed } from 'vue'
-import { VueFlow } from '@vue-flow/core'
+import { VueFlow, MarkerType } from '@vue-flow/core'
 import { useI18n } from 'vue-i18n'
 import { Background, BackgroundVariant } from '@vue-flow/background'
 import { Controls } from '@vue-flow/controls'
@@ -335,6 +335,7 @@ const nodesCount = computed(() => nodes.value.length)
             labelBgStyle: { fill: '#1e222b' },
             labelBgPadding: [6, 3],
             labelBgBorderRadius: 4,
+            markerEnd: { type: MarkerType.ArrowClosed, width: 20, height: 20 },
           }"
           @drop="onDrop"
           @dragover="onDragOver"

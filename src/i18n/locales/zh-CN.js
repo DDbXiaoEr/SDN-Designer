@@ -172,7 +172,7 @@ export default {
     vpcToSubnet: '包含子网',
     subnetToInstance: '部署实例',
     instanceToSg: '加入安全组',
-    instanceToKeyPair: '绑定密钥对',
+    keyPairToInstance: '绑定密钥对',
     eipToInstance: '绑定实例',
     subnetToGateway: '部署网关',
     subnetToRouteTable: '关联路由表',

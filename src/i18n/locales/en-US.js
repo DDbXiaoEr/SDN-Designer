@@ -172,7 +172,7 @@ export default {
     vpcToSubnet: 'contains subnet',
     subnetToInstance: 'deploy instance',
     instanceToSg: 'join security group',
-    instanceToKeyPair: 'bind key pair',
+    keyPairToInstance: 'bind key pair',
     eipToInstance: 'associate instance',
     subnetToGateway: 'deploy gateway',
     subnetToRouteTable: 'associate route table',
