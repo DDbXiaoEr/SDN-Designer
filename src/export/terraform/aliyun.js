@@ -1,4 +1,4 @@
-import { createCloudContext, resolveNextHopNode, resolveVpcRegion, resolveZone, gatewayEips, gatewaySnatSources, lbSubnets, instanceLoginAuth, resolveInstanceKeyPair, collectKeyPairs, resolveInterconnects, routeTablesOfVpc, hclLines, systemDiskConfig, dataDiskConfigs, clean } from './common.js'
+import { createCloudContext, resolveNextHopNode, resolveVpcRegion, resolveZone, gatewayEips, gatewaySnatSources, lbSubnets, instanceLoginAuth, resolveInstanceKeyPair, collectKeyPairs, resolveInterconnects, routeTablesOfVpc, hclLines, systemDiskConfig, dataDiskConfigs, clean, instanceRef, instanceCount, isCountedInstance, instancePrivateIp, instanceNameExpr, eipCount, eipRef, eipNameExpr, eipInstanceCandidates, eipBindings } from './common.js'
 import { translate } from '../../i18n/index.js'
 import { buildOutputs } from './outputs.js'
 
@@ -142,20 +142,24 @@ export function exportAliyunTerraform(nodes, edges, providerVersion) {
       const subVpc = findVpc(snatSub)
       if (subVpc && vpcIds.has(subVpc.id)) continue
       for (const eip of eips) {
-        blocks.push(`resource "alicloud_snat_entry" "${ctx.name(gw)}_snat_${snatSeq++}" {
+        for (let ei = 0; ei < eipCount(eip); ei++) {
+          blocks.push(`resource "alicloud_snat_entry" "${ctx.name(gw)}_snat_${snatSeq++}" {
   snat_table_id     = ${ref(gw)}.snat_table_ids
   source_vswitch_id = ${ref(snatSub)}.id
-  snat_ip           = ${ref(eip)}.ip_address
+  snat_ip           = ${eipRef(ctx, eip, ei)}.ip_address
 }`)
+        }
       }
     }
     for (const vpcSrc of vpcs) {
       for (const eip of eips) {
-        blocks.push(`resource "alicloud_snat_entry" "${ctx.name(gw)}_snat_${snatSeq++}" {
+        for (let ei = 0; ei < eipCount(eip); ei++) {
+          blocks.push(`resource "alicloud_snat_entry" "${ctx.name(gw)}_snat_${snatSeq++}" {
   snat_table_id = ${ref(gw)}.snat_table_ids
   source_cidr   = "${vpcSrc.data.cidr}"
-  snat_ip       = ${ref(eip)}.ip_address
+  snat_ip       = ${eipRef(ctx, eip, ei)}.ip_address
 }`)
+        }
       }
     }
   }
@@ -163,29 +167,42 @@ export function exportAliyunTerraform(nodes, edges, providerVersion) {
   for (const eip of nodes.filter((n) => n.type === 'Eip')) {
     const internetChargeType =
       eip.data.internetChargeType === 'payByBandwidth' ? 'PayByBandwidth' : 'PayByTraffic'
+    const eipRows = [
+      ...(isCountedInstance(eip)
+        ? [
+            ['count', String(eipCount(eip))],
+            ['eip_name', eipNameExpr(eip)],
+          ]
+        : []),
+      ['bandwidth', `"${eip.data.bandwidth}"`],
+      ['internet_charge_type', `"${internetChargeType}"`],
+    ]
     blocks.push(`resource "alicloud_eip" "${ctx.name(eip)}" {
-  bandwidth            = "${eip.data.bandwidth}"
-  internet_charge_type = "${internetChargeType}"
+${hclLines(eipRows)}
 }`)
-    ctx
-      .targetNodes(eip.id)
-      .filter((n) => n.type === 'Instance')
-      .forEach((inst, i) => {
-        blocks.push(`resource "alicloud_eip_association" "${ctx.name(eip)}_${i}" {
-  allocation_id = ${ref(eip)}.id
-  instance_id   = ${ref(inst)}.id
+    // 按编辑器选择的绑定生成关联（每个 EIP 绑定到选定的实例内网 IP）
+    const eipTargets = eipInstanceCandidates(ctx, eip)
+    eipBindings(eip, eipTargets).forEach((b, i) => {
+      if (!b) return
+      blocks.push(`resource "alicloud_eip_association" "${ctx.name(eip)}_${i}" {
+  allocation_id = ${eipRef(ctx, eip, i)}.id
+  instance_id   = ${instanceRef(ctx, b.node, b.index)}.id
 }`)
-      })
-    // Eip -> Gateway：把 EIP 绑定到 NAT 网关作为公网出口（instance_type 需为 Nat）
+    })
+    // Eip -> Gateway：把 EIP 绑定到 NAT 网关作为公网出口（instance_type 需为 Nat）；
+    // EIP 数量 >1 时全部绑定到网关作为多出口
     ctx
       .targetNodes(eip.id)
       .filter((n) => n.type === 'Gateway')
-      .forEach((gw, i) => {
-        blocks.push(`resource "alicloud_eip_association" "${ctx.name(eip)}_gw_${i}" {
-  allocation_id = ${ref(eip)}.id
+      .forEach((gw, gi) => {
+        for (let i = 0; i < eipCount(eip); i++) {
+          const resId = `${ctx.name(eip)}_gw_${gi}${eipCount(eip) > 1 ? `_${i}` : ''}`
+          blocks.push(`resource "alicloud_eip_association" "${resId}" {
+  allocation_id = ${eipRef(ctx, eip, i)}.id
   instance_id   = ${ref(gw)}.id
   instance_type = "Nat"
 }`)
+        }
       })
   }
 
@@ -225,12 +242,17 @@ ${hclLines(lrows)}
       ;(rule.backends || []).forEach((bid, bi) => {
         const inst = ctx.byId.get(bid)
         if (!inst || inst.type !== 'Instance') return
-        blocks.push(`resource "alicloud_slb_server_group_server_attachment" "${ruleName}_${bi}" {
+        // 多实例节点：为每一台实例各生成一条后端附件
+        const count = instanceCount(inst)
+        for (let k = 0; k < count; k++) {
+          const resId = count > 1 ? `${ruleName}_${bi}_${k}` : `${ruleName}_${bi}`
+          blocks.push(`resource "alicloud_slb_server_group_server_attachment" "${resId}" {
   server_group_id = alicloud_slb_server_group.${sgName}.id
-  server_id       = ${ref(inst)}.id
+  server_id       = ${instanceRef(ctx, inst, k)}.id
   port            = ${port}
   type            = "ecs"
 }`)
+        }
       })
     })
   }
@@ -252,13 +274,19 @@ ${hclLines(lrows)}
     const kp = resolveInstanceKeyPair(ctx, inst)
     const sysDisk = systemDiskConfig(inst.data, 'cloud_essd')
     const dataDisks = dataDiskConfigs(inst.data, 'cloud_essd')
+    const counted = isCountedInstance(inst)
+    // 多实例按子网 CIDR 顺序分配私网 IP；单实例保持固定值
+    const priv = counted
+      ? instancePrivateIp(inst.data, sub && sub.data.cidr, 'count.index')
+      : `"${inst.data.privateIp}"`
     const rows = [
-      ['instance_name', `"${clean(inst.data.name)}"`],
+      ...(counted ? [['count', String(instanceCount(inst))]] : []),
+      ['instance_name', instanceNameExpr(inst)],
       ['instance_type', `"${inst.data.instanceType}"`],
       ['image_id', `"${inst.data.imageId}"`],
       ...aliyunChargeRows(inst.data.chargeType),
       ['vswitch_id', vswRef],
-      ['private_ip', `"${inst.data.privateIp}"`],
+      ...(priv ? [['private_ip', priv]] : []),
       ['internet_max_bandwidth_out', '0'],
       ['system_disk_category', `"${sysDisk.type}"`],
       ['system_disk_size', String(sysDisk.size)],
@@ -301,7 +329,7 @@ ${hclLines(rows)}${dataDiskBlock}
       let nexthopId = route.nextHop
       if (!nexthopId) {
         const hop = resolveNextHopNode(ctx, route, vpc)
-        if (hop) nexthopId = ref(hop) + '.id'
+        if (hop) nexthopId = (hop.type === 'Instance' ? instanceRef(ctx, hop, 0) : ref(hop)) + '.id'
       }
       if (!nexthopId) nexthopId = `"" # ${tt('fillNextHop')}`
       blocks.push(`resource "alicloud_route_entry" "${ctx.name(rt)}_${i}" {

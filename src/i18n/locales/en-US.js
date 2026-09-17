@@ -130,6 +130,7 @@ export default {
   },
   fields: {
     name: 'Name',
+    namePrefix: 'Name Prefix',
     subnet: 'Subnet CIDR',
     externalNetwork: 'External Network',
     encapType: 'Tunnel Protocol',
@@ -142,6 +143,7 @@ export default {
     type: 'Type',
     imageId: 'Image ID',
     instanceType: 'Instance Type',
+    count: 'Count',
     chargeType: 'Billing Method',
     privateIp: 'Private IP',
     loginType: 'Login Method',
@@ -187,6 +189,7 @@ export default {
     charge: 'Billing',
     disk: 'Disk',
     keyPairMode: 'Source',
+    count: 'Count',
   },
   connections: {
     vmToSwitch: 'attach port',
@@ -255,6 +258,9 @@ export default {
     subnetStockTitle: 'Zone Stock',
     subnetStockUnavailable: 'Instance {instance} type {type} is out of stock in zone {zone}; it is only stocked in {zones}.',
     subnetStockRegionUnavailable: 'Instance {instance} type {type} is not available in region {region}; change the type or the VPC region.',
+    eipBindingTitle: 'EIP Association',
+    eipBindingHint: 'Choose the instance private IP each EIP binds to; leave empty to skip (defaults to in-order binding when unset).',
+    eipUnbound: 'Unbound',
   },
   createHost: {
     title: 'Create Host Chassis',

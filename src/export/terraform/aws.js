@@ -1,4 +1,4 @@
-import { createCloudContext, resolveNextHopNode, parsePortRange, resolveVpcRegion, resolveZone, gatewayEips, lbSubnets, lbVpc, instanceLoginAuth, resolveInstanceKeyPair, collectKeyPairs, resolveInterconnects, routeTablesOfVpc, tlsKeyBlocks, hclLines, systemDiskConfig, dataDiskConfigs, clean } from './common.js'
+import { createCloudContext, resolveNextHopNode, parsePortRange, resolveVpcRegion, resolveZone, gatewayEips, lbSubnets, lbVpc, instanceLoginAuth, resolveInstanceKeyPair, collectKeyPairs, resolveInterconnects, routeTablesOfVpc, tlsKeyBlocks, hclLines, systemDiskConfig, dataDiskConfigs, clean, instanceRef, instanceCount, isCountedInstance, instancePrivateIp, instanceNameExpr, eipCount, eipRef, eipNameExpr, eipInstanceCandidates, eipBindings } from './common.js'
 import { translate } from '../../i18n/index.js'
 import { buildOutputs } from './outputs.js'
 
@@ -127,20 +127,21 @@ export function exportAwsTerraform(nodes, edges, providerVersion) {
 
   const eips = nodes.filter((n) => n.type === 'Eip')
   for (const eip of eips) {
-    blocks.push(`resource "aws_eip" "${ctx.name(eip)}" {
+    const eipCountLine = isCountedInstance(eip) ? `\n  count = ${eipCount(eip)}` : ''
+    blocks.push(`resource "aws_eip" "${ctx.name(eip)}" {${eipCountLine}
   tags = {
-    Name = "${clean(eip.data.name)}"
+    Name = ${eipNameExpr(eip)}
   }
 }`)
-    ctx
-      .targetNodes(eip.id)
-      .filter((n) => n.type === 'Instance')
-      .forEach((inst, i) => {
-        blocks.push(`resource "aws_eip_association" "${ctx.name(eip)}_${i}" {
-  allocation_id = ${ref(eip)}.id
-  instance_id   = ${ref(inst)}.id
+    // 按编辑器选择的绑定生成关联（每个 EIP 绑定到选定的实例内网 IP）
+    const eipTargets = eipInstanceCandidates(ctx, eip)
+    eipBindings(eip, eipTargets).forEach((b, i) => {
+      if (!b) return
+      blocks.push(`resource "aws_eip_association" "${ctx.name(eip)}_${i}" {
+  allocation_id = ${eipRef(ctx, eip, i)}.id
+  instance_id   = ${instanceRef(ctx, b.node, b.index)}.id
 }`)
-      })
+    })
   }
 
   for (const gw of nodes.filter((n) => n.type === 'Gateway')) {
@@ -149,7 +150,7 @@ export function exportAwsTerraform(nodes, edges, providerVersion) {
     const vswRef = sub ? ref(sub) + '.id' : `"" # ${tt('unassociatedVswitch')}`
     // 优先使用 Eip -> Gateway 连线绑定的 EIP，未连线时回退到未绑定实例的 EIP
     const eipNode = gatewayEips(ctx, gw)[0]
-    const allocRef = eipNode ? ref(eipNode) + '.id' : `"" # TODO: ${tt('fillNextHop')}`
+    const allocRef = eipNode ? eipRef(ctx, eipNode, 0) + '.id' : `"" # TODO: ${tt('fillNextHop')}`
     blocks.push(`resource "aws_nat_gateway" "${ctx.name(gw)}" {
   allocation_id = ${allocRef}
   subnet_id     = ${vswRef}
@@ -191,11 +192,16 @@ ${hclLines(rows)}
       ;(rule.backends || []).forEach((bid, bi) => {
         const inst = ctx.byId.get(bid)
         if (!inst || inst.type !== 'Instance') return
-        blocks.push(`resource "aws_lb_target_group_attachment" "${tgName}_${bi}" {
+        // 多实例节点：为每一台实例各生成一条目标组绑定
+        const count = instanceCount(inst)
+        for (let k = 0; k < count; k++) {
+          const resId = count > 1 ? `${tgName}_${bi}_${k}` : `${tgName}_${bi}`
+          blocks.push(`resource "aws_lb_target_group_attachment" "${resId}" {
   target_group_arn = aws_lb_target_group.${tgName}.arn
-  target_id        = ${ref(inst)}.id
+  target_id        = ${instanceRef(ctx, inst, k)}.id
   port             = ${port}
 }`)
+        }
       })
       blocks.push(`resource "aws_lb_listener" "${ruleName}" {
   load_balancer_arn = ${ref(lb)}.arn
@@ -243,6 +249,13 @@ ${tlsKeyBlocks(keyName, resName)}`)
       inst.data.chargeType === 'spot'
         ? `\n\n  instance_market_options {\n    market_type = "spot"\n  }`
         : ''
+    const counted = isCountedInstance(inst)
+    // 多实例按子网 CIDR 顺序分配私网 IP；单实例保持固定值
+    const priv = counted
+      ? instancePrivateIp(inst.data, sub && sub.data.cidr, 'count.index')
+      : `"${inst.data.privateIp}"`
+    const countLine = counted ? `\n  count         = ${instanceCount(inst)}` : ''
+    const privLine = priv ? `\n  private_ip    = ${priv}` : ''
     const sysDisk = systemDiskConfig(inst.data, 'gp3')
     const dataDisks = dataDiskConfigs(inst.data, 'gp3')
     const dataDiskBlock = dataDisks.length
@@ -257,11 +270,10 @@ ${tlsKeyBlocks(keyName, resName)}`)
           )
           .join('')
       : ''
-    blocks.push(`resource "aws_instance" "${ctx.name(inst)}" {
+    blocks.push(`resource "aws_instance" "${ctx.name(inst)}" {${countLine}
   ami           = "${inst.data.imageId}"
   instance_type = "${inst.data.instanceType}"
-  subnet_id     = ${vswRef}${sgLine}
-  private_ip    = "${inst.data.privateIp}"${authLine}${marketLine}
+  subnet_id     = ${vswRef}${sgLine}${privLine}${authLine}${marketLine}
 
   root_block_device {
     volume_type = "${sysDisk.type}"
@@ -269,7 +281,7 @@ ${tlsKeyBlocks(keyName, resName)}`)
   }${dataDiskBlock}
 
   tags = {
-    Name = "${clean(inst.data.name)}"
+    Name = ${instanceNameExpr(inst)}
   }
 }`)
   }
@@ -292,7 +304,7 @@ ${tlsKeyBlocks(keyName, resName)}`)
       } else if (hop && route.nextHopType === 'NatGateway') {
         hopLine = `  nat_gateway_id         = ${ref(hop)}.id`
       } else if (hop && route.nextHopType === 'Instance') {
-        hopLine = `  instance_id            = ${ref(hop)}.id`
+        hopLine = `  instance_id            = ${instanceRef(ctx, hop, 0)}.id`
       } else {
         hopLine = `  # ${tt('fillNextHop')}`
       }

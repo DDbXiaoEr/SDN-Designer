@@ -130,6 +130,7 @@ export default {
   },
   fields: {
     name: '名称',
+    namePrefix: '名称前缀',
     subnet: '子网 CIDR',
     externalNetwork: '外部网络',
     encapType: '隧道协议',
@@ -142,6 +143,7 @@ export default {
     type: '类型',
     imageId: '镜像 ID',
     instanceType: '实例规格',
+    count: '数量',
     chargeType: '计费方式',
     privateIp: '私网 IP',
     loginType: '登录方式',
@@ -187,6 +189,7 @@ export default {
     charge: '计费',
     disk: '磁盘',
     keyPairMode: '来源',
+    count: '数量',
   },
   connections: {
     vmToSwitch: '挂载端口',
@@ -255,6 +258,9 @@ export default {
     subnetStockTitle: '可用区库存',
     subnetStockUnavailable: '实例 {instance} 的规格 {type} 在可用区 {zone} 无货，该规格仅在 {zones} 有货。',
     subnetStockRegionUnavailable: '实例 {instance} 的规格 {type} 在当前地域 {region} 不可用，请更换规格或调整 VPC 地域。',
+    eipBindingTitle: 'EIP 绑定实例',
+    eipBindingHint: '为每个 EIP 选择要绑定的实例内网 IP；不选则不绑定（未选择时默认按序绑定）。',
+    eipUnbound: '不绑定',
   },
   createHost: {
     title: '创建宿主机 Chassis',

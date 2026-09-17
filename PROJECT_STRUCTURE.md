@@ -95,9 +95,9 @@ OVN-Designer/
 | VPC             | cloud   | `name`, `cidr`, `region`                           |
 | Subnet          | cloud   | `name`, `cidr`, `zone`                             |
 | Gateway         | cloud   | `name`（NAT 网关）                                 |
-| Eip             | cloud   | `name`, `bandwidth`, `internetChargeType`(payByTraffic/payByBandwidth) |
+| Eip             | cloud   | `name`, `count`(数量，>1 表示多个公网 IP，导出为 Terraform `count`), `bandwidth`, `internetChargeType`(payByTraffic/payByBandwidth), `bindings{序号:{id,index}\|null}`（按 EIP 序号记录绑定，兼容旧 `{实例节点id:序号}`） |
 | SecurityGroup   | cloud   | `name`, `rules[]`                                  |
-| Instance        | cloud   | `name`, `imageId`, `instanceType`, `chargeType`(subscription/payAsYouGo/spot), `privateIp`, `loginType`(keyPair/password), `keyPair`, `password`, `systemDisk{type,size}`, `dataDisks[{type,size}]` |
+| Instance        | cloud   | `name`, `count`(数量，>1 表示多台同规格实例，导出为 Terraform `count`), `imageId`, `instanceType`, `chargeType`(subscription/payAsYouGo/spot), `privateIp`, `loginType`(keyPair/password), `keyPair`, `password`, `systemDisk{type,size}`, `dataDisks[{type,size}]` |
 | LoadBalancer    | cloud   | `name`, `internal`, `rules[{protocol, port, backends[]}]`（每条规则=监听器+后端实例 id） |
 | RouteTable      | cloud   | `name`, `routes[]`                                 |
 | Interconnect    | cloud   | `name`（VPC 对等连接，连接多个 VPC）               |
@@ -139,6 +139,21 @@ OVN-Designer/
   导出时映射为各厂商字段（如阿里云 `instance_charge_type` + `spot_strategy`，腾讯云 `instance_charge_type`，华为云 `charging_mode`，AWS `instance_market_options`）。
 - 独立 `Eip` 节点表示公网 IP；`Eip → Instance` 连线表示绑定到该实例，导出为厂商绑定资源
   （`alicloud_eip_association` / `tencentcloud_eip_association` / `huaweicloud_compute_eip_associate` / `aws_eip_association`）。
+- `Eip` 的「数量」`data.count` 与 `Instance` 同语义：>1 时导出为该 EIP 资源加 `count`，名称转为前缀
+  （`名称-序号`，`eipNameExpr`），引用用 `eipRef` 带索引。`common.js` 的 `eipInstanceCandidates` 展开直连实例
+  （多实例按序展开）为「实例名-序号 (内网 IP)」候选，`eipBindings(eip, candidates)` 归一化每个 EIP 的绑定：
+  新格式 `Eip.data.bindings = { 序号: {id,index} | null }`：缺省键按同序候选回退（连上即绑定），
+  `null` 表示显式不绑定（对象映射可跨 JSON 序列化保留），兼容旧 `{实例节点id:序号}` 与早期数组格式；
+  在 `NodeEditorDialog` 的「EIP 绑定实例」分区按 EIP 逐行下拉选择。EIP 数量 >1 时绑定到 NAT 网关的
+  出口会全部展开（阿里云逐条 association、腾讯云 `assigned_eip_set`、华为云 SNAT `floating_ip_id` 列表；
+  AWS `aws_nat_gateway` 仅取第 0 个）。
+- `Instance` 的「数量」`data.count` 表示多台同规格实例：数量 >1 时导出为该实例资源加 `count`，
+  节点名称转为「名称前缀」（画布展示为 `名称-*`，编辑器标签变为「名称前缀」），实例名导出为
+  `名称-序号`（`instanceNameExpr`，序号自 1 起）；资源引用带索引
+  （`common.js` 的 `instanceCount` / `isCountedInstance` / `instanceRef`）；
+  私网 IP 由 `instancePrivateIp` 以子网 CIDR 顺序分配（`cidrhost(cidr, 偏移 + count.index)`），
+  无法计算时省略交由云平台分配。负载均衡后端、网关按实例 SNAT、实例级 EIP 绑定等引用会按数量展开，
+  「创建后可获取」属性用 `[*]` splat 输出全部。
 - `Gateway` 节点表示 NAT 网关，用于「多台 ECS 共享一个 EIP 出口」：`Eip → Gateway` 绑定公网出口，
   来源可接 `VPC → Gateway`（整网）、`Subnet → Gateway`（按子网）或 `Instance → Gateway`（按实例），
   再配合 `RouteTable` 的 `0.0.0.0/0 → NatGateway` 路由即可让多个 ECS 经同一 EIP SNAT 出公网。导出时：

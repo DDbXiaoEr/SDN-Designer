@@ -1,4 +1,4 @@
-import { buildGraph, slug } from '../utils.js'
+import { buildGraph, slug, parseCidr, ipToInt, intToIp } from '../utils.js'
 
 // 取首个配置了地域的 VPC 的地域，作为 Terraform provider 的默认地域
 export function resolveVpcRegion(nodes, fallback) {
@@ -170,6 +170,124 @@ export function hclLines(rows) {
 // 清理字符串首尾空白，避免导出的资源名/属性因尾随空格触发无谓变更
 export function clean(value) {
   return String(value ?? '').trim()
+}
+
+// 实例数量：一个 Instance 节点代表多台同规格实例，非法值回退为 1
+export function instanceCount(node) {
+  const n = Number(node && node.data && node.data.count)
+  return Number.isFinite(n) && n > 1 ? Math.floor(n) : 1
+}
+
+// 多实例（count>1）时资源使用 Terraform count，引用需带索引
+export function isCountedInstance(node) {
+  return instanceCount(node) > 1
+}
+
+// 实例资源引用：多实例时按索引取用（默认第 0 台）
+export function instanceRef(ctx, node, index = 0) {
+  const base = ctx.ref(node)
+  if (!base || !isCountedInstance(node)) return base
+  return `${base}[${index}]`
+}
+
+// 实例名称 HCL 表达式：多实例以节点名称作为前缀并追加序号（从 1 开始，需配合 count）
+export function instanceNameExpr(node) {
+  const base = clean(node && node.data && node.data.name)
+  return isCountedInstance(node) ? `"${base}-\${count.index + 1}"` : `"${base}"`
+}
+
+// EIP 数量：一个 Eip 节点代表多个同规格公网 IP（复用实例的 count 语义）
+export function eipCount(eip) {
+  return instanceCount(eip)
+}
+
+// EIP 资源引用：数量 >1 时按索引取用
+export function eipRef(ctx, eip, index = 0) {
+  return instanceRef(ctx, eip, index)
+}
+
+// EIP 名称 HCL 表达式：数量 >1 时以节点名称为前缀追加序号
+export function eipNameExpr(eip) {
+  return instanceNameExpr(eip)
+}
+
+// 展开 EIP 直连实例的可绑定候选：每台实例（多实例按序展开）一项，含名称与内网 IP
+export function eipInstanceCandidates(ctx, eip) {
+  const out = []
+  for (const inst of ctx.targetNodes(eip.id)) {
+    if (inst.type !== 'Instance') continue
+    const sub = ctx.findSubnet(inst)
+    const count = instanceCount(inst)
+    for (let k = 0; k < count; k++) {
+      out.push({
+        id: inst.id,
+        index: k,
+        node: inst,
+        name: count > 1 ? `${clean(inst.data.name)}-${k + 1}` : clean(inst.data.name),
+        ip: instancePrivateIpAt(inst, sub && sub.data.cidr, k),
+      })
+    }
+  }
+  return out
+}
+
+// 归一化 EIP 绑定：返回按 EIP 序号排列的候选（或 null）。
+// 存储为按 EIP 序号的对象映射 { [i]: { id, index } | null }：缺省键按同序候选回退（连上即绑定），
+// null 表示显式不绑定（可跨 JSON 序列化保留）；兼容旧格式 { 实例节点id: 序号 } 与早期数组格式。
+export function eipBindings(eip, candidates) {
+  const raw = (eip && eip.data && eip.data.bindings) || {}
+  const count = instanceCount(eip)
+  const result = new Array(count).fill(null)
+  const findCand = (b) =>
+    b && typeof b === 'object'
+      ? candidates.find((c) => c.id === b.id && c.index === (Number(b.index) || 0)) || null
+      : null
+  if (Array.isArray(raw)) {
+    // 数组格式无法区分「未设置」与「不绑定」，统一按回退处理
+    for (let i = 0; i < count; i++) result[i] = findCand(raw[i])
+    for (let i = 0; i < count; i++) if (!result[i] && candidates[i]) result[i] = candidates[i]
+    return result
+  }
+  // 旧格式：{ 实例节点id: 序号 }（键非纯数字、值为数字）
+  const keys = Object.keys(raw)
+  const isLegacy = keys.length > 0 && !keys.every((k) => /^\d+$/.test(k))
+  if (isLegacy) {
+    const first = Object.entries(raw)[0]
+    result[0] = candidates.find((c) => c.id === first[0] && c.index === (Number(first[1]) || 0)) || null
+    for (let i = 0; i < count; i++) if (!result[i] && candidates[i]) result[i] = candidates[i]
+    return result
+  }
+  for (let i = 0; i < count; i++) {
+    const b = raw[i]
+    if (b === undefined) result[i] = candidates[i] || null
+    else if (b !== null) result[i] = findCand(b)
+  }
+  return result
+}
+
+// 实例第 index 台的实际私网 IP（用于展示）：多实例按子网 CIDR 顺序分配，
+// 无法计算时回退到基础私网 IP；单实例直接返回其私网 IP
+export function instancePrivateIpAt(node, subnetCidr, index = 0) {
+  const ip = clean(node && node.data && node.data.privateIp)
+  if (!ip || instanceCount(node) <= 1) return ip
+  const info = parseCidr(subnetCidr)
+  if (!info) return ip
+  const offset = ipToInt(ip) - ipToInt(info.network)
+  if (!(offset > 0)) return ip
+  return intToIp(ipToInt(info.network) + offset + index)
+}
+
+// 实例私网 IP 表达式：多实例（indexExpr 非空）时以子网 CIDR 为基础按序分配，
+// 无法计算时返回 null（由云平台自动分配）；单实例返回固定值字面量
+export function instancePrivateIp(data, subnetCidr, indexExpr) {
+  const ip = clean(data && data.privateIp)
+  if (!indexExpr) return ip ? `"${ip}"` : null
+  if (!ip) return null
+  const info = parseCidr(subnetCidr)
+  if (!info) return null
+  const offset = ipToInt(ip) - ipToInt(info.network)
+  if (!(offset > 0)) return null
+  return `cidrhost("${clean(subnetCidr)}", ${offset} + ${indexExpr})`
 }
 
 // 各厂商可用区命名：region + 分隔符 + 后缀（阿里云/腾讯云带连字符，AWS/华为云直接拼接）

@@ -169,11 +169,14 @@ export const NODE_TYPES = {
     badge: 'EIP',
     defaults: () => ({
       name: 'eip1',
+      // 数量 >1 时代表多个公网 IP，导出为 Terraform count
+      count: 1,
       bandwidth: 5,
       internetChargeType: 'payByTraffic',
     }),
     fields: [
       { key: 'name', label: 'fields.name', type: 'text' },
+      { key: 'count', label: 'fields.count', type: 'number' },
       { key: 'bandwidth', label: 'fields.bandwidth', type: 'text' },
       {
         key: 'internetChargeType',
@@ -185,10 +188,14 @@ export const NODE_TYPES = {
         ],
       },
     ],
-    summary: (d) => [
-      ['summary.bandwidth', `${d.bandwidth} Mbps`],
-      ['summary.charge', d.internetChargeType === 'payByBandwidth' ? 'PayByBandwidth' : 'PayByTraffic'],
-    ],
+    summary: (d) => {
+      const rows = [
+        ['summary.bandwidth', `${d.bandwidth} Mbps`],
+        ['summary.charge', d.internetChargeType === 'payByBandwidth' ? 'PayByBandwidth' : 'PayByTraffic'],
+      ]
+      if (Number(d.count) > 1) rows.push(['summary.count', String(Math.floor(Number(d.count)))])
+      return rows
+    },
   },
   SecurityGroup: {
     category: 'cloud',
@@ -211,6 +218,8 @@ export const NODE_TYPES = {
     handles: { source: 4, target: 4 },
     defaults: (vendor) => ({
       name: 'ecs1',
+      // 数量 >1 时代表多台同规格实例，导出为 Terraform count
+      count: 1,
       imageId: defaultImage(vendor),
       instanceType: defaultInstanceType(vendor),
       chargeType: defaultChargeType(),
@@ -223,6 +232,7 @@ export const NODE_TYPES = {
     }),
     fields: [
       { key: 'name', label: 'fields.name', type: 'text' },
+      { key: 'count', label: 'fields.count', type: 'number' },
       { key: 'imageId', label: 'fields.imageId', type: 'combo', options: (vendor) => imageOptions(vendor) },
       { key: 'instanceType', label: 'fields.instanceType', type: 'combo', options: (vendor) => instanceTypeOptions(vendor) },
       {
@@ -248,11 +258,13 @@ export const NODE_TYPES = {
       const disk = d.systemDisk || {}
       const sys = Number(disk.size) > 0 ? Number(disk.size) : 40
       const dataCount = (d.dataDisks || []).filter((x) => Number(x.size) > 0).length
-      return [
+      const rows = [
         ['summary.ip', d.privateIp],
         ['summary.spec', d.instanceType],
         ['summary.disk', dataCount ? `${sys} + ${dataCount}` : String(sys)],
       ]
+      if (Number(d.count) > 1) rows.push(['summary.count', String(Math.floor(Number(d.count)))])
+      return rows
     },
   },
   LoadBalancer: {

@@ -8,7 +8,7 @@ import { nodeLabelKey } from '../data/vendors.js'
 import { vendor } from '../store/vendor.js'
 import { useDesigner } from '../store/designer.js'
 import { instanceTypeZones } from '../store/catalog.js'
-import { resolveZone, validateInstanceZones, createCloudContext, lbBackendCandidates } from '../export/terraform/common.js'
+import { resolveZone, validateInstanceZones, createCloudContext, lbBackendCandidates, instanceCount, eipInstanceCandidates, eipBindings } from '../export/terraform/common.js'
 import TransferBox from './TransferBox.vue'
 
 const props = defineProps({
@@ -93,6 +93,40 @@ const lbCandidates = computed(() => {
   }))
 })
 
+// EIP 直连实例的可绑定候选（多实例按序展开为「名称-序号 (内网 IP)」）
+const eipCandidates = computed(() => {
+  if (!node.value || node.value.type !== 'Eip') return []
+  const ctx = createCloudContext(nodes.value, edges.value, {})
+  return eipInstanceCandidates(ctx, node.value)
+})
+
+const eipCount = computed(() =>
+  node.value && node.value.type === 'Eip' ? instanceCount(node.value) : 1
+)
+
+// 归一化后的绑定（含默认按序回退），用于回显每个 EIP 的下拉
+const eipResolved = computed(() =>
+  node.value && node.value.type === 'Eip' ? eipBindings(node.value, eipCandidates.value) : []
+)
+
+function eipSelectValue(i) {
+  const b = eipResolved.value[i]
+  return b ? `${b.id}#${b.index}` : ''
+}
+
+function setEipBinding(i, value) {
+  const cur = node.value.data.bindings
+  const raw = cur && !Array.isArray(cur) && typeof cur === 'object' ? { ...cur } : {}
+  if (value) {
+    const [id, index] = value.split('#')
+    raw[i] = { id, index: Number(index) || 0 }
+  } else {
+    // null 表示显式不绑定（缺省键才是「未设置，按序回退」）
+    raw[i] = null
+  }
+  patch('bindings', raw)
+}
+
 function addLbRule() {
   const rules = [...(node.value.data.rules || [])]
   rules.push({ protocol: 'tcp', port: '80', backends: [] })
@@ -118,6 +152,15 @@ function isFieldVisible(f) {
 
 function tl(s) {
   return s && te(s) ? t(s) : s
+}
+
+// 多实例时 Instance/Eip 的「名称」实为名称前缀，标签随之调整
+function fieldLabel(f) {
+  const multi = node.value.type === 'Instance' || node.value.type === 'Eip'
+  if (multi && f.key === 'name' && Number(node.value.data.count) > 1) {
+    return t('fields.namePrefix')
+  }
+  return t(f.label)
 }
 
 function patch(key, value) {
@@ -270,7 +313,7 @@ function toggleOutput(key, checked) {
 
       <div class="modal-body">
         <div v-for="f in def.fields" v-show="isFieldVisible(f)" :key="f.key" class="field">
-          <label>{{ t(f.label) }}</label>
+          <label>{{ fieldLabel(f) }}</label>
           <select v-if="f.type === 'select'" :value="node.data[f.key]" @change="patch(f.key, $event.target.value)">
             <option v-for="o in optionsFor(f)" :key="o.value" :value="o.value">{{ tl(o.label) }}</option>
           </select>
@@ -295,6 +338,14 @@ function toggleOutput(key, checked) {
             type="checkbox"
             :checked="node.data[f.key]"
             @change="f.key === 'controller' ? patchController($event.target.checked) : patch(f.key, $event.target.checked)"
+          />
+          <input
+            v-else-if="f.type === 'number'"
+            type="number"
+            min="1"
+            step="1"
+            :value="node.data[f.key] ?? 1"
+            @input="patch(f.key, Number($event.target.value))"
           />
           <input
             v-else-if="f.type === 'password'"
@@ -403,6 +454,26 @@ function toggleOutput(key, checked) {
             <button class="mini danger" @click="removeDataDisk(i)">{{ t('common.delete') }}</button>
           </div>
           <button class="add" @click="addDataDisk">{{ t('inspector.addDataDisk') }}</button>
+        </div>
+
+        <div v-if="node.type === 'Eip' && eipCandidates.length" class="section">
+          <div class="section-title">{{ t('inspector.eipBindingTitle') }}</div>
+          <p class="section-hint">{{ t('inspector.eipBindingHint') }}</p>
+          <div v-for="i in eipCount" :key="i - 1" class="rule">
+            <div class="rule-row">
+              <input v-if="eipCount > 1" :value="`EIP ${i}`" disabled />
+              <select :value="eipSelectValue(i - 1)" @change="setEipBinding(i - 1, $event.target.value)">
+                <option value="">{{ t('inspector.eipUnbound') }}</option>
+                <option
+                  v-for="c in eipCandidates"
+                  :key="`${c.id}#${c.index}`"
+                  :value="`${c.id}#${c.index}`"
+                >
+                  {{ c.ip ? `${c.name} (${c.ip})` : c.name }}
+                </option>
+              </select>
+            </div>
+          </div>
         </div>
 
         <div v-if="nodeOutputs.length" class="section">

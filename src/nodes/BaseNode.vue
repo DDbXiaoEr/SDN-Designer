@@ -19,6 +19,13 @@ const summary = computed(() =>
   def.value.summary ? def.value.summary(props.data).map(([k, v]) => [t(k), v]) : []
 )
 
+// 多实例（数量>1）时节点名称转为前缀，展示为 name-* 以区别于单个资源
+const displayName = computed(() => {
+  const count = Number(props.data.count)
+  const multi = props.type === 'Instance' || props.type === 'Eip'
+  return multi && count > 1 ? `${props.data.name}-*` : props.data.name
+})
+
 const handles = computed(() => def.value.handles || { source: 2, target: 2 })
 const targetIds = computed(() => Array.from({ length: handles.value.target }, (_, i) => `target-${i}`))
 const sourceIds = computed(() => Array.from({ length: handles.value.source }, (_, i) => `source-${i}`))
@@ -40,7 +47,8 @@ function handleTop(i, total) {
     />
     <div class="node-header">
       <span class="badge">{{ nodeBadge(props.type, vendor) }}</span>
-      <span class="node-name">{{ data.name }}</span>
+      <span class="node-name">{{ displayName }}</span>
+      <span v-if="data.count > 1" class="count">×{{ data.count }}</span>
       <span v-if="data.controller" class="ctrl">{{ t('nodes.controllerBadge') }}</span>
     </div>
     <div class="node-body">
@@ -107,6 +115,15 @@ function handleTop(i, total) {
 .ctrl {
   margin-left: auto;
   background: var(--accent);
+  color: #0f1117;
+  font-weight: 700;
+  font-size: 10px;
+  border-radius: 4px;
+  padding: 1px 5px;
+  letter-spacing: 0.5px;
+}
+.count {
+  background: var(--cloud);
   color: #0f1117;
   font-weight: 700;
   font-size: 10px;

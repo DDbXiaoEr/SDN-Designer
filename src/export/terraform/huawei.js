@@ -1,4 +1,4 @@
-import { createCloudContext, resolveNextHopNode, parsePortRange, resolveVpcRegion, resolveZone, gatewayEips, gatewaySnatSources, vpcSubnets, lbSubnets, lbVpc, instanceLoginAuth, resolveInstanceKeyPair, collectKeyPairs, resolveInterconnects, routeTablesOfVpc, tlsKeyBlocks, hclLines, systemDiskConfig, dataDiskConfigs, clean } from './common.js'
+import { createCloudContext, resolveNextHopNode, parsePortRange, resolveVpcRegion, resolveZone, gatewayEips, gatewaySnatSources, vpcSubnets, lbSubnets, lbVpc, instanceLoginAuth, resolveInstanceKeyPair, collectKeyPairs, resolveInterconnects, routeTablesOfVpc, tlsKeyBlocks, hclLines, systemDiskConfig, dataDiskConfigs, clean, instanceRef, instanceCount, isCountedInstance, instancePrivateIp, instanceNameExpr, eipCount, eipRef, eipNameExpr, eipInstanceCandidates, eipBindings } from './common.js'
 import { parseCidr } from '../utils.js'
 import { translate } from '../../i18n/index.js'
 import { buildOutputs } from './outputs.js'
@@ -146,26 +146,27 @@ export function exportHuaweiTerraform(nodes, edges, providerVersion) {
 
   for (const eip of nodes.filter((n) => n.type === 'Eip')) {
     const chargeMode = eip.data.internetChargeType === 'payByBandwidth' ? 'bandwidth' : 'traffic'
-    blocks.push(`resource "huaweicloud_vpc_eip" "${ctx.name(eip)}" {
+    const eipCountLine = isCountedInstance(eip) ? `\n  count = ${eipCount(eip)}` : ''
+    blocks.push(`resource "huaweicloud_vpc_eip" "${ctx.name(eip)}" {${eipCountLine}
   publicip {
     type = "5_bgp"
   }
   bandwidth {
-    name        = "${clean(eip.data.name)}"
+    name        = ${eipNameExpr(eip)}
     share_type  = "PER"
     size        = ${Number(eip.data.bandwidth) || 5}
     charge_mode = "${chargeMode}"
   }
 }`)
-    ctx
-      .targetNodes(eip.id)
-      .filter((n) => n.type === 'Instance')
-      .forEach((inst, i) => {
-        blocks.push(`resource "huaweicloud_compute_eip_associate" "${ctx.name(eip)}_${i}" {
-  public_ip   = ${ref(eip)}.address
-  instance_id = ${ref(inst)}.id
+    // 按编辑器选择的绑定生成关联（每个 EIP 绑定到选定的实例内网 IP）
+    const eipTargets = eipInstanceCandidates(ctx, eip)
+    eipBindings(eip, eipTargets).forEach((b, i) => {
+      if (!b) return
+      blocks.push(`resource "huaweicloud_compute_eip_associate" "${ctx.name(eip)}_${i}" {
+  public_ip   = ${eipRef(ctx, eip, i)}.address
+  instance_id = ${instanceRef(ctx, b.node, b.index)}.id
 }`)
-      })
+    })
   }
 
   let snatSeq = 0 // SNAT 规则资源名后缀，保证多个网关/子网组合唯一
@@ -182,7 +183,10 @@ export function exportHuaweiTerraform(nodes, edges, providerVersion) {
 }`)
     // SNAT 来源：子网直连；实例降级到其所属子网；VPC 降级为 VPC 内各子网。
     // floating_ip_id 即绑定的 EIP（多个用逗号连接），使多台 ECS 共享同一公网出口
-    const floatingIps = gatewayEips(ctx, gw).map((e) => `${ref(e)}.id`)
+    // 展开 EIP 数量，得到全部公网 IP 引用（多出口）
+    const floatingIps = gatewayEips(ctx, gw).flatMap((e) =>
+      Array.from({ length: eipCount(e) }, (_, ei) => `${eipRef(ctx, e, ei)}.id`)
+    )
     if (floatingIps.length) {
       const { vpcs, subnets, instances } = gatewaySnatSources(ctx, gw)
       const snatSubnets = new Map(subnets.map((s) => [s.id, s]))
@@ -242,9 +246,16 @@ ${hclLines(rows)}
         const inst = ctx.byId.get(bid)
         if (!inst || inst.type !== 'Instance') return
         const instSub = findSubnet(inst)
+        const count = instanceCount(inst)
+        const counted = isCountedInstance(inst)
+        // 多实例节点：成员资源自带 count，地址按子网 CIDR 顺序分配
+        const address =
+          (counted ? instancePrivateIp(inst.data, instSub && instSub.data.cidr, 'count.index') : null) ||
+          `"${inst.data.privateIp}"`
         const mrows = [
+          ...(counted ? [['count', String(count)]] : []),
           ['pool_id', `huaweicloud_elb_pool.${poolName}.id`],
-          ['address', `"${inst.data.privateIp}"`],
+          ['address', address],
           ['protocol_port', String(port)],
         ]
         if (instSub) mrows.push(['subnet_id', `${ref(instSub)}.id`])
@@ -274,8 +285,14 @@ ${tlsKeyBlocks(keyName, resName)}`)
     const kp = resolveInstanceKeyPair(ctx, inst)
     const sysDisk = systemDiskConfig(inst.data, 'GPSSD')
     const dataDisks = dataDiskConfigs(inst.data, 'GPSSD')
+    const counted = isCountedInstance(inst)
+    // 多实例按子网 CIDR 顺序分配私网 IP；单实例保持固定值
+    const priv =
+      (counted ? instancePrivateIp(inst.data, sub && sub.data.cidr, 'count.index') : null) ||
+      `"${inst.data.privateIp}"`
     const rows = [
-      ['name', `"${clean(inst.data.name)}"`],
+      ...(counted ? [['count', String(instanceCount(inst))]] : []),
+      ['name', instanceNameExpr(inst)],
       huaweiImageRow(inst.data.imageId),
       ['flavor_id', `"${inst.data.instanceType}"`],
       ...huaweiChargeRows(inst.data.chargeType),
@@ -309,7 +326,7 @@ ${hclLines(rows)}${dataDiskBlock}
 
   network {
     uuid        = ${subRef}
-    fixed_ip_v4 = "${inst.data.privateIp}"
+    fixed_ip_v4 = ${priv}
   }
 }`)
   }
@@ -333,7 +350,7 @@ ${hclLines(rows)}${dataDiskBlock}
         nexthop = ref(hop) + '.id'
       } else if (hop && route.nextHopType === 'Instance') {
         type = 'ecs'
-        nexthop = ref(hop) + '.id'
+        nexthop = instanceRef(ctx, hop, 0) + '.id'
       } else {
         type = 'nat'
         nexthop = `"" # ${tt('fillNextHop')}`

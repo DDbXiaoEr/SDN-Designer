@@ -1,4 +1,4 @@
-import { createCloudContext, resolveNextHopNode, parsePortRange, resolveVpcRegion, resolveZone, gatewayEips, gatewaySnatSources, vpcSubnets, lbSubnets, lbVpc, instanceLoginAuth, resolveInstanceKeyPair, collectKeyPairs, collectExistingKeyPairs, escapeRegex, resolveInterconnects, routeTablesOfVpc, tlsKeyBlocks, hclLines, systemDiskConfig, dataDiskConfigs, clean } from './common.js'
+import { createCloudContext, resolveNextHopNode, parsePortRange, resolveVpcRegion, resolveZone, gatewayEips, gatewaySnatSources, vpcSubnets, lbSubnets, lbVpc, instanceLoginAuth, resolveInstanceKeyPair, collectKeyPairs, collectExistingKeyPairs, escapeRegex, resolveInterconnects, routeTablesOfVpc, tlsKeyBlocks, hclLines, systemDiskConfig, dataDiskConfigs, clean, instanceRef, instanceCount, isCountedInstance, instancePrivateIp, instanceNameExpr, eipCount, eipRef, eipNameExpr, eipInstanceCandidates, eipBindings } from './common.js'
 import { translate } from '../../i18n/index.js'
 import { buildOutputs } from './outputs.js'
 
@@ -143,20 +143,24 @@ export function exportTencentTerraform(nodes, edges, providerVersion) {
       eip.data.internetChargeType === 'payByBandwidth'
         ? 'BANDWIDTH_POSTPAID_BY_HOUR'
         : 'TRAFFIC_POSTPAID_BY_HOUR'
+    const eipRows = [
+      ...(isCountedInstance(eip) ? [['count', String(eipCount(eip))]] : []),
+      ['name', eipNameExpr(eip)],
+      ['internet_charge_type', `"${internetChargeType}"`],
+      ['internet_max_bandwidth_out', String(Number(eip.data.bandwidth) || 5)],
+    ]
     blocks.push(`resource "tencentcloud_eip" "${ctx.name(eip)}" {
-  name                       = "${clean(eip.data.name)}"
-  internet_charge_type       = "${internetChargeType}"
-  internet_max_bandwidth_out = ${Number(eip.data.bandwidth) || 5}
+${hclLines(eipRows)}
 }`)
-    ctx
-      .targetNodes(eip.id)
-      .filter((n) => n.type === 'Instance')
-      .forEach((inst, i) => {
-        blocks.push(`resource "tencentcloud_eip_association" "${ctx.name(eip)}_${i}" {
-  eip_id      = ${ref(eip)}.id
-  instance_id = ${ref(inst)}.id
+    // 按编辑器选择的绑定生成关联（每个 EIP 绑定到选定的实例内网 IP）
+    const eipTargets = eipInstanceCandidates(ctx, eip)
+    eipBindings(eip, eipTargets).forEach((b, i) => {
+      if (!b) return
+      blocks.push(`resource "tencentcloud_eip_association" "${ctx.name(eip)}_${i}" {
+  eip_id      = ${eipRef(ctx, eip, i)}.id
+  instance_id = ${instanceRef(ctx, b.node, b.index)}.id
 }`)
-      })
+    })
   }
 
   let snatSeq = 0 // SNAT 规则资源名后缀，保证多个网关/子网组合唯一
@@ -164,9 +168,13 @@ export function exportTencentTerraform(nodes, edges, providerVersion) {
     const vpc = findVpc(gw)
     const vpcRef = vpc ? ref(vpc) + '.id' : `"" # ${tt('unassociatedVpc')}`
     const eips = gatewayEips(ctx, gw)
+    // 展开 EIP 数量，得到全部公网 IP 引用（多出口）
+    const eipIpRefs = eips.flatMap((e) =>
+      Array.from({ length: eipCount(e) }, (_, ei) => `${eipRef(ctx, e, ei)}.public_ip`)
+    )
     // assigned_eip_set 为必填项，未连接 EIP 时给出 TODO 提示
-    const eipSet = eips.length
-      ? `\n  assigned_eip_set = [\n${eips.map((e) => `    ${ref(e)}.public_ip,`).join('\n')}\n  ]`
+    const eipSet = eipIpRefs.length
+      ? `\n  assigned_eip_set = [\n${eipIpRefs.map((r) => `    ${r},`).join('\n')}\n  ]`
       : `\n  # TODO: ${tt('bindEipToGateway')}`
     blocks.push(`resource "tencentcloud_nat_gateway" "${ctx.name(gw)}" {
   name           = "${clean(gw.data.name)}"
@@ -175,13 +183,13 @@ export function exportTencentTerraform(nodes, edges, providerVersion) {
   max_concurrent = 1000000${eipSet}
 }`)
     // SNAT 来源：子网直连；VPC 降级为 VPC 内各子网；实例用 NETWORKINTERFACE（腾讯云原生支持）
-    if (eips.length) {
+    if (eipIpRefs.length) {
       const { vpcs, subnets, instances } = gatewaySnatSources(ctx, gw)
       const snatSubnets = new Map(subnets.map((s) => [s.id, s]))
       for (const vpcSrc of vpcs) {
         for (const s of vpcSubnets(ctx, vpcSrc)) snatSubnets.set(s.id, s)
       }
-      const ipList = eips.map((e) => `${ref(e)}.public_ip`).join(', ')
+      const ipList = eipIpRefs.join(', ')
       for (const snatSub of snatSubnets.values()) {
         blocks.push(`resource "tencentcloud_nat_gateway_snat" "${ctx.name(gw)}_snat_${snatSeq++}" {
   nat_gateway_id    = ${ref(gw)}.id
@@ -193,14 +201,17 @@ export function exportTencentTerraform(nodes, edges, providerVersion) {
 }`)
       }
       for (const inst of instances) {
-        blocks.push(`resource "tencentcloud_nat_gateway_snat" "${ctx.name(gw)}_snat_${snatSeq++}" {
+        // 多实例节点：为每一台实例各生成一条按实例的 SNAT
+        for (let k = 0; k < instanceCount(inst); k++) {
+          blocks.push(`resource "tencentcloud_nat_gateway_snat" "${ctx.name(gw)}_snat_${snatSeq++}" {
   nat_gateway_id           = ${ref(gw)}.id
   resource_type            = "NETWORKINTERFACE"
-  instance_id              = ${ref(inst)}.id
-  instance_private_ip_addr = ${ref(inst)}.private_ip
+  instance_id              = ${instanceRef(ctx, inst, k)}.id
+  instance_private_ip_addr = ${instanceRef(ctx, inst, k)}.private_ip
   description              = "${clean(gw.data.name)} snat"
   public_ip_addr           = [${ipList}]
 }`)
+        }
       }
     }
   }
@@ -233,13 +244,14 @@ ${hclLines(rows)}
         .map((bid) => ctx.byId.get(bid))
         .filter((inst) => inst && inst.type === 'Instance')
       if (targets.length) {
+        // 多实例节点：每台实例各生成一个 targets 块
         const targetBlocks = targets
-          .map(
-            (inst) => `  targets {
-    instance_id = ${ref(inst)}.id
+          .flatMap((inst) =>
+            Array.from({ length: instanceCount(inst) }, (_, k) => `  targets {
+    instance_id = ${instanceRef(ctx, inst, k)}.id
     port        = ${port}
     weight      = 10
-  }`
+  }`)
           )
           .join('\n')
         blocks.push(`resource "tencentcloud_clb_attachment" "${ruleName}" {
@@ -282,15 +294,21 @@ ${tlsKeyBlocks(keyName, resName)}`)
     const dataDisks = dataDiskConfigs(inst.data, 'CLOUD_PREMIUM')
     // 腾讯云实例必须指定可用区，优先从关联子网的可用区推导（与子网保持一致）
     const az = resolveZone(sub?.data.zone, vpc?.data.region || region, 'tencent')
+    const counted = isCountedInstance(inst)
+    // 多实例按子网 CIDR 顺序分配私网 IP；单实例保持固定值
+    const priv = counted
+      ? instancePrivateIp(inst.data, sub && sub.data.cidr, 'count.index')
+      : `"${inst.data.privateIp}"`
     const rows = [
-      ['instance_name', `"${clean(inst.data.name)}"`],
+      ...(counted ? [['count', String(instanceCount(inst))]] : []),
+      ['instance_name', instanceNameExpr(inst)],
       ['image_id', `"${inst.data.imageId}"`],
       ['instance_type', `"${inst.data.instanceType}"`],
       ...tencentChargeRows(inst.data.chargeType),
       ['vpc_id', vpcRef],
       ['subnet_id', subRef],
       ['availability_zone', `"${az}"`],
-      ['private_ip', `"${inst.data.privateIp}"`],
+      ...(priv ? [['private_ip', priv]] : []),
       ['system_disk_type', `"${sysDisk.type}"`],
       ['system_disk_size', String(sysDisk.size)],
     ]
@@ -343,7 +361,7 @@ ${hclLines(rows)}${dataDiskBlock}
         nextHub = ref(hop) + '.id'
       } else if (hop && route.nextHopType === 'Instance') {
         nextType = 'CVM'
-        nextHub = ref(hop) + '.id'
+        nextHub = instanceRef(ctx, hop, 0) + '.id'
       } else {
         nextType = 'NAT'
         nextHub = `"" # ${tt('fillNextHop')}`
