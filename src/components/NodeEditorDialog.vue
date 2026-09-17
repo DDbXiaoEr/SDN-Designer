@@ -8,7 +8,8 @@ import { nodeLabelKey } from '../data/vendors.js'
 import { vendor } from '../store/vendor.js'
 import { useDesigner } from '../store/designer.js'
 import { instanceTypeZones } from '../store/catalog.js'
-import { resolveZone, validateInstanceZones } from '../export/terraform/common.js'
+import { resolveZone, validateInstanceZones, createCloudContext, lbBackendCandidates } from '../export/terraform/common.js'
+import TransferBox from './TransferBox.vue'
 
 const props = defineProps({
   nodeId: { type: String, required: true },
@@ -79,6 +80,34 @@ const subnetStockIssues = computed(() => {
     instanceTypeZones(vendor.value, type)
   ).filter((it) => it.subnetId === node.value.id)
 })
+
+// 负载均衡后端候选：来自直接连接的 ECS 及接入的子网/VPC 内的所有 ECS
+const lbCandidates = computed(() => {
+  if (!node.value || node.value.type !== 'LoadBalancer') return []
+  const ctx = createCloudContext(nodes.value, edges.value, {})
+  return lbBackendCandidates(ctx, node.value).map((inst) => ({
+    value: inst.id,
+    label: inst.data.privateIp
+      ? `${inst.data.name} (${inst.data.privateIp})`
+      : inst.data.name,
+  }))
+})
+
+function addLbRule() {
+  const rules = [...(node.value.data.rules || [])]
+  rules.push({ protocol: 'tcp', port: '80', backends: [] })
+  patch('rules', rules)
+}
+function removeLbRule(i) {
+  const rules = [...(node.value.data.rules || [])]
+  rules.splice(i, 1)
+  patch('rules', rules)
+}
+function lbRulePatch(i, key, value) {
+  const rules = [...(node.value.data.rules || [])]
+  rules[i] = { ...rules[i], [key]: value }
+  patch('rules', rules)
+}
 
 function isFieldVisible(f) {
   if (f.when && !f.when(node.value.data)) return false
@@ -387,6 +416,35 @@ function toggleOutput(key, checked) {
             />
             {{ tl(o.label) }}
           </label>
+        </div>
+
+        <div v-if="node.type === 'LoadBalancer'" class="section">
+          <div class="section-title">{{ t('inspector.lbRulesTitle') }}</div>
+          <p class="section-hint">{{ t('inspector.lbBackendHint') }}</p>
+          <div v-for="(rule, i) in node.data.rules || []" :key="i" class="rule">
+            <div class="rule-row">
+              <select :value="rule.protocol" @change="lbRulePatch(i, 'protocol', $event.target.value)">
+                <option value="tcp">TCP</option>
+                <option value="udp">UDP</option>
+                <option value="http">HTTP</option>
+                <option value="https">HTTPS</option>
+              </select>
+              <input
+                :placeholder="t('inspector.lbPortPlaceholder')"
+                :value="rule.port"
+                @input="lbRulePatch(i, 'port', $event.target.value)"
+              />
+            </div>
+            <TransferBox
+              :options="lbCandidates"
+              :model-value="rule.backends || []"
+              :left-title="t('inspector.lbCandidates')"
+              :right-title="t('inspector.lbSelected')"
+              @update:model-value="lbRulePatch(i, 'backends', $event)"
+            />
+            <button class="mini danger" @click="removeLbRule(i)">{{ t('common.delete') }}</button>
+          </div>
+          <button class="add" @click="addLbRule">{{ t('inspector.lbAddRule') }}</button>
         </div>
 
         <div v-if="node.type === 'Host'" class="section">

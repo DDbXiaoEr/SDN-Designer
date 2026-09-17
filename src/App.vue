@@ -6,12 +6,13 @@ import { Background, BackgroundVariant } from '@vue-flow/background'
 import { Controls } from '@vue-flow/controls'
 import { MiniMap } from '@vue-flow/minimap'
 import { nodeTypes } from './nodes/index.js'
-import { canConnect } from './data/nodeDefinitions.js'
+import { NODE_TYPES, canConnect } from './data/nodeDefinitions.js'
+import { nodeLabelKey } from './data/vendors.js'
 import { createDemoDesign } from './data/demo.js'
 import { createDesigner, nextId } from './store/designer.js'
 import { exportOvn } from './export/ovn.js'
 import { exportTerraform } from './export/terraform/index.js'
-import { validateZones, validateInstanceZones } from './export/terraform/common.js'
+import { validateZones, validateInstanceZones, validateGatewaySources, validateLoadBalancers } from './export/terraform/common.js'
 import { instanceTypeZones } from './store/catalog.js'
 import { download } from './export/utils.js'
 import { serializeDesign, deserializeDesign, loadFromStorage } from './store/persistence.js'
@@ -22,6 +23,8 @@ import Inspector from './components/Inspector.vue'
 import ExportModal from './components/ExportModal.vue'
 import CreateHostDialog from './components/CreateHostDialog.vue'
 import NodeEditorDialog from './components/NodeEditorDialog.vue'
+import MessagePanel from './components/MessagePanel.vue'
+import CanvasScrollbars from './components/CanvasScrollbars.vue'
 
 import '@vue-flow/core/dist/style.css'
 import '@vue-flow/core/dist/theme-default.css'
@@ -61,6 +64,40 @@ function runToastAction() {
   const action = toast.value && toast.value.action
   toast.value = null
   if (action) action.run()
+}
+
+// 消息区域：记录连线校验等提示（最新在下），由底部消息面板展示
+const messages = ref([])
+let messageSeq = 0
+function pushMessage(level, text) {
+  messages.value.push({
+    id: `msg_${++messageSeq}`,
+    level,
+    text,
+    time: new Date().toLocaleTimeString(),
+  })
+}
+function clearMessages() {
+  messages.value = []
+}
+
+// 节点在消息中的展示：类型名 + 名称
+function nodeRef(node) {
+  const def = NODE_TYPES[node.type]
+  const label = def ? t(nodeLabelKey(def, vendor.value)) : node.type
+  const name = (node.data && node.data.name) || ''
+  return name ? `${label}「${name}」` : label
+}
+
+// 连线不合法时给出针对性提示：优先提示方向反了，其次引导常见场景，最后给通用说明
+function connectionHint(source, target) {
+  if (canConnect(target.type, source.type)) {
+    return t('messages.reverseHint', { from: nodeRef(target), to: nodeRef(source) })
+  }
+  if (source.type === 'Instance' && (target.type === 'Gateway' || target.type === 'Eip')) {
+    return t('messages.instanceEgressHint')
+  }
+  return t('messages.connectionHint')
 }
 
 // 载入内置示例拓扑；边标签按当前语言从连接规则解析
@@ -120,11 +157,24 @@ function onConnect(conn) {
   const target = nodes.value.find((n) => n.id === conn.target)
   if (!source || !target) return
   const rule = canConnect(source.type, target.type)
-  if (!rule) return
+  if (!rule) {
+    // 不允许的连线：写入消息区域并给出原因/建议，避免用户以为没反应
+    pushMessage(
+      'warn',
+      `${t('messages.unsupportedConnection', { source: nodeRef(source), target: nodeRef(target) })}；${connectionHint(source, target)}`
+    )
+    return
+  }
   const exists = edges.value.some(
     (e) => e.source === conn.source && e.target === conn.target
   )
-  if (exists) return
+  if (exists) {
+    pushMessage(
+      'info',
+      t('messages.duplicateConnection', { source: nodeRef(source), target: nodeRef(target) })
+    )
+    return
+  }
   vf.addEdges([
     {
       id: nextId('e'),
@@ -292,6 +342,14 @@ function showTerraform() {
           })
     )
   })
+  // 网关 SNAT 来源的厂商降级提示（如阿里云/华为云实例级降级为子网级）
+  validateGatewaySources(nodes.value, edges.value, vendor.value).forEach((w) => {
+    warnings.push(t(w.key, { ...w.params, vendor: t(`vendors.${vendor.value}`) }))
+  })
+  // 负载均衡配置提示（未接入网络 / 监听规则未选后端）
+  validateLoadBalancers(nodes.value, edges.value, vendor.value).forEach((w) => {
+    warnings.push(t(w.key, w.params))
+  })
   exportModal.value = {
     title: t('export.terraformTitle', { vendor: t(`vendors.${vendor.value}`) }),
     groups: files.map((f) => ({
@@ -348,10 +406,13 @@ const nodesCount = computed(() => nodes.value.length)
           <Background :variant="BackgroundVariant.Dots" :gap="20" :size="1" />
           <Controls />
           <MiniMap :pannable="true" :zoomable="true" />
+          <CanvasScrollbars />
         </VueFlow>
       </div>
       <Inspector @edit="onEditSelected" />
     </div>
+
+    <MessagePanel :messages="messages" @clear="clearMessages" />
 
     <ExportModal
       v-if="exportModal"

@@ -1,4 +1,4 @@
-import { createCloudContext, resolveNextHopNode, parsePortRange, resolveVpcRegion, resolveZone, instanceLoginAuth, resolveInstanceKeyPair, collectKeyPairs, resolveInterconnects, routeTablesOfVpc, tlsKeyBlocks, systemDiskConfig, dataDiskConfigs, clean } from './common.js'
+import { createCloudContext, resolveNextHopNode, parsePortRange, resolveVpcRegion, resolveZone, gatewayEips, lbSubnets, lbVpc, instanceLoginAuth, resolveInstanceKeyPair, collectKeyPairs, resolveInterconnects, routeTablesOfVpc, tlsKeyBlocks, hclLines, systemDiskConfig, dataDiskConfigs, clean } from './common.js'
 import { translate } from '../../i18n/index.js'
 import { buildOutputs } from './outputs.js'
 
@@ -12,6 +12,7 @@ const resourceTypes = {
   securityGroupRule: 'aws_security_group_rule',
   eip: 'aws_eip',
   natGateway: 'aws_nat_gateway',
+  loadBalancer: 'aws_lb',
   routeTable: 'aws_route_table',
   routeEntry: 'aws_route',
   interconnect: 'aws_vpc_peering_connection',
@@ -146,8 +147,8 @@ export function exportAwsTerraform(nodes, edges, providerVersion) {
     const sub = findSubnet(gw)
     const vpc = findVpc(gw)
     const vswRef = sub ? ref(sub) + '.id' : `"" # ${tt('unassociatedVswitch')}`
-    const freeEips = eips.filter((e) => !ctx.targetNodes(e.id).some((n) => n.type === 'Instance'))
-    const eipNode = freeEips[0] || eips[0]
+    // 优先使用 Eip -> Gateway 连线绑定的 EIP，未连线时回退到未绑定实例的 EIP
+    const eipNode = gatewayEips(ctx, gw)[0]
     const allocRef = eipNode ? ref(eipNode) + '.id' : `"" # TODO: ${tt('fillNextHop')}`
     blocks.push(`resource "aws_nat_gateway" "${ctx.name(gw)}" {
   allocation_id = ${allocRef}
@@ -157,6 +158,56 @@ export function exportAwsTerraform(nodes, edges, providerVersion) {
     Name = "${clean(gw.data.name)}"
   }
 }`)
+  }
+
+  // 负载均衡：ALB/NLB 实例 + 每个监听规则一个目标组/监听器 + 目标绑定
+  for (const lb of nodes.filter((n) => n.type === 'LoadBalancer')) {
+    const vpc = lbVpc(ctx, lb)
+    const subs = lbSubnets(ctx, lb)
+    const rules = lb.data.rules || []
+    // HTTP/HTTPS 用应用型 ALB，TCP/UDP 用网络型 NLB
+    const isL7 = rules.some((r) => ['http', 'https'].includes(String(r.protocol || '').toLowerCase()))
+    const rows = [
+      ['name', `"${clean(lb.data.name)}"`],
+      ['load_balancer_type', isL7 ? '"application"' : '"network"'],
+      ['internal', lb.data.internal ? 'true' : 'false'],
+    ]
+    if (subs.length) rows.push(['subnets', `[${subs.map((s) => `${ref(s)}.id`).join(', ')}]`])
+    blocks.push(`resource "aws_lb" "${ctx.name(lb)}" {
+${hclLines(rows)}
+}`)
+    rules.forEach((rule, ri) => {
+      const ruleName = `${ctx.name(lb)}_${ri}`
+      const port = Number(rule.port) || 80
+      const proto = String(rule.protocol || 'tcp').toUpperCase()
+      const tgName = `${ruleName}_tg`
+      blocks.push(`resource "aws_lb_target_group" "${tgName}" {
+  name        = "${clean(lb.data.name)}-${ri}"
+  port        = ${port}
+  protocol    = "${proto}"
+  target_type = "instance"
+  vpc_id      = ${vpc ? `${ref(vpc)}.id` : `"" # ${tt('unassociatedVpc')}`}
+}`)
+      ;(rule.backends || []).forEach((bid, bi) => {
+        const inst = ctx.byId.get(bid)
+        if (!inst || inst.type !== 'Instance') return
+        blocks.push(`resource "aws_lb_target_group_attachment" "${tgName}_${bi}" {
+  target_group_arn = aws_lb_target_group.${tgName}.arn
+  target_id        = ${ref(inst)}.id
+  port             = ${port}
+}`)
+      })
+      blocks.push(`resource "aws_lb_listener" "${ruleName}" {
+  load_balancer_arn = ${ref(lb)}.arn
+  port              = ${port}
+  protocol          = "${proto}"
+
+  default_action {
+    type             = "forward"
+    target_group_arn = aws_lb_target_group.${tgName}.arn
+  }
+}`)
+    })
   }
 
   const keyPairs = collectKeyPairs(ctx, nodes)

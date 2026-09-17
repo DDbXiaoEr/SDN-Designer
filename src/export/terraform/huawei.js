@@ -1,4 +1,4 @@
-import { createCloudContext, resolveNextHopNode, parsePortRange, resolveVpcRegion, resolveZone, instanceLoginAuth, resolveInstanceKeyPair, collectKeyPairs, resolveInterconnects, routeTablesOfVpc, tlsKeyBlocks, hclLines, systemDiskConfig, dataDiskConfigs, clean } from './common.js'
+import { createCloudContext, resolveNextHopNode, parsePortRange, resolveVpcRegion, resolveZone, gatewayEips, gatewaySnatSources, vpcSubnets, lbSubnets, lbVpc, instanceLoginAuth, resolveInstanceKeyPair, collectKeyPairs, resolveInterconnects, routeTablesOfVpc, tlsKeyBlocks, hclLines, systemDiskConfig, dataDiskConfigs, clean } from './common.js'
 import { parseCidr } from '../utils.js'
 import { translate } from '../../i18n/index.js'
 import { buildOutputs } from './outputs.js'
@@ -13,6 +13,7 @@ const resourceTypes = {
   securityGroupRule: 'huaweicloud_networking_secgroup_rule',
   eip: 'huaweicloud_vpc_eip',
   natGateway: 'huaweicloud_nat_gateway',
+  loadBalancer: 'huaweicloud_elb_loadbalancer',
   routeTable: 'huaweicloud_vpc_route_table',
   routeEntry: 'huaweicloud_vpc_route',
   interconnect: 'huaweicloud_vpc_peering_connection',
@@ -167,6 +168,7 @@ export function exportHuaweiTerraform(nodes, edges, providerVersion) {
       })
   }
 
+  let snatSeq = 0 // SNAT 规则资源名后缀，保证多个网关/子网组合唯一
   for (const gw of nodes.filter((n) => n.type === 'Gateway')) {
     const sub = findSubnet(gw)
     const vpc = findVpc(gw)
@@ -178,6 +180,79 @@ export function exportHuaweiTerraform(nodes, edges, providerVersion) {
   subnet_id = ${subRef}
   spec      = "1"
 }`)
+    // SNAT 来源：子网直连；实例降级到其所属子网；VPC 降级为 VPC 内各子网。
+    // floating_ip_id 即绑定的 EIP（多个用逗号连接），使多台 ECS 共享同一公网出口
+    const floatingIps = gatewayEips(ctx, gw).map((e) => `${ref(e)}.id`)
+    if (floatingIps.length) {
+      const { vpcs, subnets, instances } = gatewaySnatSources(ctx, gw)
+      const snatSubnets = new Map(subnets.map((s) => [s.id, s]))
+      for (const inst of instances) {
+        const instSub = findSubnet(inst)
+        if (instSub) snatSubnets.set(instSub.id, instSub)
+      }
+      for (const vpcSrc of vpcs) {
+        for (const s of vpcSubnets(ctx, vpcSrc)) snatSubnets.set(s.id, s)
+      }
+      for (const snatSub of snatSubnets.values()) {
+        blocks.push(`resource "huaweicloud_nat_snat_rule" "${ctx.name(gw)}_snat_${snatSeq++}" {
+  nat_gateway_id = ${ref(gw)}.id
+  subnet_id      = ${ref(snatSub)}.id
+  floating_ip_id = join(",", [${floatingIps.join(', ')}])
+}`)
+      }
+    }
+  }
+
+  // 负载均衡：ELB 实例 + 每个监听规则一个监听器/后端服务器组/成员
+  for (const lb of nodes.filter((n) => n.type === 'LoadBalancer')) {
+    const vpc = lbVpc(ctx, lb)
+    const sub = lbSubnets(ctx, lb)[0]
+    const zone = resolveZone(sub && sub.data.zone, (vpc && vpc.data.region) || region, 'huawei')
+    const rows = [
+      ['name', `"${clean(lb.data.name)}"`],
+      ['availability_zone', `["${zone}"]`],
+      ['vpc_id', vpc ? `${ref(vpc)}.id` : `"" # ${tt('unassociatedVpc')}`],
+    ]
+    if (sub) rows.push(['ipv4_subnet_id', `${ref(sub)}.id`])
+    blocks.push(`resource "huaweicloud_elb_loadbalancer" "${ctx.name(lb)}" {
+${hclLines(rows)}
+}`)
+    ;(lb.data.rules || []).forEach((rule, ri) => {
+      const ruleName = `${ctx.name(lb)}_${ri}`
+      const port = Number(rule.port) || 80
+      const proto = String(rule.protocol || 'tcp').toUpperCase()
+      // HTTPS 监听器的后端协议用 HTTP
+      const poolProto = proto === 'HTTPS' ? 'HTTP' : proto
+      blocks.push(`resource "huaweicloud_elb_listener" "${ruleName}" {
+  name            = "${clean(lb.data.name)}-${ri}"
+  protocol        = "${proto}"
+  protocol_port   = ${port}
+  loadbalancer_id = ${ref(lb)}.id
+}`)
+      const poolName = `${ruleName}_pool`
+      blocks.push(`resource "huaweicloud_elb_pool" "${poolName}" {
+  name            = "${clean(lb.data.name)}-${ri}"
+  protocol        = "${poolProto}"
+  lb_method       = "ROUND_ROBIN"
+  listener_id     = huaweicloud_elb_listener.${ruleName}.id
+  loadbalancer_id = ${ref(lb)}.id
+  vpc_id          = ${vpc ? `${ref(vpc)}.id` : `"" # ${tt('unassociatedVpc')}`}
+}`)
+      ;(rule.backends || []).forEach((bid, bi) => {
+        const inst = ctx.byId.get(bid)
+        if (!inst || inst.type !== 'Instance') return
+        const instSub = findSubnet(inst)
+        const mrows = [
+          ['pool_id', `huaweicloud_elb_pool.${poolName}.id`],
+          ['address', `"${inst.data.privateIp}"`],
+          ['protocol_port', String(port)],
+        ]
+        if (instSub) mrows.push(['subnet_id', `${ref(instSub)}.id`])
+        blocks.push(`resource "huaweicloud_elb_member" "${ruleName}_${bi}" {
+${hclLines(mrows)}
+}`)
+      })
+    })
   }
 
   const keyPairs = collectKeyPairs(ctx, nodes)

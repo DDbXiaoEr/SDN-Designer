@@ -1,4 +1,4 @@
-import { createCloudContext, resolveNextHopNode, parsePortRange, resolveVpcRegion, resolveZone, instanceLoginAuth, resolveInstanceKeyPair, collectKeyPairs, collectExistingKeyPairs, escapeRegex, resolveInterconnects, routeTablesOfVpc, tlsKeyBlocks, hclLines, systemDiskConfig, dataDiskConfigs, clean } from './common.js'
+import { createCloudContext, resolveNextHopNode, parsePortRange, resolveVpcRegion, resolveZone, gatewayEips, gatewaySnatSources, vpcSubnets, lbSubnets, lbVpc, instanceLoginAuth, resolveInstanceKeyPair, collectKeyPairs, collectExistingKeyPairs, escapeRegex, resolveInterconnects, routeTablesOfVpc, tlsKeyBlocks, hclLines, systemDiskConfig, dataDiskConfigs, clean } from './common.js'
 import { translate } from '../../i18n/index.js'
 import { buildOutputs } from './outputs.js'
 
@@ -12,6 +12,7 @@ const resourceTypes = {
   securityGroupRule: 'tencentcloud_security_group_rule',
   eip: 'tencentcloud_eip',
   natGateway: 'tencentcloud_nat_gateway',
+  loadBalancer: 'tencentcloud_clb_instance',
   routeTable: 'tencentcloud_route_table',
   routeEntry: 'tencentcloud_route_entry',
   interconnect: 'tencentcloud_vpc_peering_connection',
@@ -158,15 +159,96 @@ export function exportTencentTerraform(nodes, edges, providerVersion) {
       })
   }
 
+  let snatSeq = 0 // SNAT 规则资源名后缀，保证多个网关/子网组合唯一
   for (const gw of nodes.filter((n) => n.type === 'Gateway')) {
     const vpc = findVpc(gw)
     const vpcRef = vpc ? ref(vpc) + '.id' : `"" # ${tt('unassociatedVpc')}`
+    const eips = gatewayEips(ctx, gw)
+    // assigned_eip_set 为必填项，未连接 EIP 时给出 TODO 提示
+    const eipSet = eips.length
+      ? `\n  assigned_eip_set = [\n${eips.map((e) => `    ${ref(e)}.public_ip,`).join('\n')}\n  ]`
+      : `\n  # TODO: ${tt('bindEipToGateway')}`
     blocks.push(`resource "tencentcloud_nat_gateway" "${ctx.name(gw)}" {
   name           = "${clean(gw.data.name)}"
   vpc_id         = ${vpcRef}
   bandwidth      = 100
-  max_concurrent = 1000000
+  max_concurrent = 1000000${eipSet}
 }`)
+    // SNAT 来源：子网直连；VPC 降级为 VPC 内各子网；实例用 NETWORKINTERFACE（腾讯云原生支持）
+    if (eips.length) {
+      const { vpcs, subnets, instances } = gatewaySnatSources(ctx, gw)
+      const snatSubnets = new Map(subnets.map((s) => [s.id, s]))
+      for (const vpcSrc of vpcs) {
+        for (const s of vpcSubnets(ctx, vpcSrc)) snatSubnets.set(s.id, s)
+      }
+      const ipList = eips.map((e) => `${ref(e)}.public_ip`).join(', ')
+      for (const snatSub of snatSubnets.values()) {
+        blocks.push(`resource "tencentcloud_nat_gateway_snat" "${ctx.name(gw)}_snat_${snatSeq++}" {
+  nat_gateway_id    = ${ref(gw)}.id
+  resource_type     = "SUBNET"
+  subnet_id         = ${ref(snatSub)}.id
+  subnet_cidr_block = ${ref(snatSub)}.cidr_block
+  description       = "${clean(gw.data.name)} snat"
+  public_ip_addr    = [${ipList}]
+}`)
+      }
+      for (const inst of instances) {
+        blocks.push(`resource "tencentcloud_nat_gateway_snat" "${ctx.name(gw)}_snat_${snatSeq++}" {
+  nat_gateway_id           = ${ref(gw)}.id
+  resource_type            = "NETWORKINTERFACE"
+  instance_id              = ${ref(inst)}.id
+  instance_private_ip_addr = ${ref(inst)}.private_ip
+  description              = "${clean(gw.data.name)} snat"
+  public_ip_addr           = [${ipList}]
+}`)
+      }
+    }
+  }
+
+  // 负载均衡：CLB 实例 + 每个监听规则一个监听器/后端绑定
+  for (const lb of nodes.filter((n) => n.type === 'LoadBalancer')) {
+    const vpc = lbVpc(ctx, lb)
+    const sub = lbSubnets(ctx, lb)[0]
+    const rows = [
+      ['clb_name', `"${clean(lb.data.name)}"`],
+      ['network_type', lb.data.internal ? '"INTERNAL"' : '"OPEN"'],
+      ['vpc_id', vpc ? `${ref(vpc)}.id` : `"" # ${tt('unassociatedVpc')}`],
+    ]
+    // 内网 CLB 必须指定子网
+    if (lb.data.internal && sub) rows.push(['subnet_id', `${ref(sub)}.id`])
+    blocks.push(`resource "tencentcloud_clb_instance" "${ctx.name(lb)}" {
+${hclLines(rows)}
+}`)
+    ;(lb.data.rules || []).forEach((rule, ri) => {
+      const ruleName = `${ctx.name(lb)}_${ri}`
+      const port = Number(rule.port) || 80
+      const proto = String(rule.protocol || 'tcp').toUpperCase()
+      blocks.push(`resource "tencentcloud_clb_listener" "${ruleName}" {
+  clb_id        = ${ref(lb)}.id
+  listener_name = "${clean(lb.data.name)}-${ri}"
+  port          = ${port}
+  protocol      = "${proto}"
+}`)
+      const targets = (rule.backends || [])
+        .map((bid) => ctx.byId.get(bid))
+        .filter((inst) => inst && inst.type === 'Instance')
+      if (targets.length) {
+        const targetBlocks = targets
+          .map(
+            (inst) => `  targets {
+    instance_id = ${ref(inst)}.id
+    port        = ${port}
+    weight      = 10
+  }`
+          )
+          .join('\n')
+        blocks.push(`resource "tencentcloud_clb_attachment" "${ruleName}" {
+  clb_id      = ${ref(lb)}.id
+  listener_id = tencentcloud_clb_listener.${ruleName}.id
+${targetBlocks}
+}`)
+      }
+    })
   }
 
   const keyPairs = collectKeyPairs(ctx, nodes)

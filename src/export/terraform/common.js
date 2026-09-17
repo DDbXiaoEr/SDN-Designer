@@ -20,7 +20,7 @@ export function createCloudContext(nodes, edges, resourceTypes) {
       resourceNames.set(n.id, count === 1 ? base : `${base}_${count}`)
     }
   }
-  ;['VPC', 'Subnet', 'Instance', 'SecurityGroup', 'Gateway', 'Eip', 'RouteTable', 'Interconnect'].forEach(assignUniqueNames)
+  ;['VPC', 'Subnet', 'Instance', 'SecurityGroup', 'Gateway', 'Eip', 'LoadBalancer', 'RouteTable', 'Interconnect'].forEach(assignUniqueNames)
 
   const name = (node) => resourceNames.get(node.id)
 
@@ -32,6 +32,7 @@ export function createCloudContext(nodes, edges, resourceTypes) {
     if (type === 'SecurityGroup') return `${resourceTypes.securityGroup}.${name(node)}`
     if (type === 'Gateway') return `${resourceTypes.natGateway}.${name(node)}`
     if (type === 'Eip') return `${resourceTypes.eip}.${name(node)}`
+    if (type === 'LoadBalancer') return `${resourceTypes.loadBalancer}.${name(node)}`
     if (type === 'RouteTable') return `${resourceTypes.routeTable}.${name(node)}`
     if (type === 'Interconnect') return `${resourceTypes.interconnect}.${name(node)}`
     return null
@@ -71,6 +72,70 @@ export function resolveNextHopNode(ctx, route, vpc) {
     return insts.find((i) => ctx.findVpc(i)?.id === vpc?.id) || insts[0] || null
   }
   return null
+}
+
+// 网关绑定的出口 EIP（Eip -> Gateway 连线）；未显式连线时回退到未绑定实例的 EIP，
+// 使「多 ECS 共享一个 EIP 出口」的 NAT 网关导出仍可落地
+export function gatewayEips(ctx, gateway) {
+  const bound = ctx.sourceNodes(gateway.id).filter((n) => n.type === 'Eip')
+  if (bound.length) return bound
+  return ctx.nodes.filter(
+    (n) => n.type === 'Eip' && !ctx.targetNodes(n.id).some((t) => t.type === 'Instance')
+  )
+}
+
+// 网关的 SNAT 来源（VPC -> Gateway、Subnet -> Gateway、Instance -> Gateway），
+// 各厂商按自身能力原生支持或降级处理
+export function gatewaySnatSources(ctx, gateway) {
+  const sources = ctx.sourceNodes(gateway.id)
+  return {
+    vpcs: sources.filter((n) => n.type === 'VPC'),
+    subnets: sources.filter((n) => n.type === 'Subnet'),
+    instances: sources.filter((n) => n.type === 'Instance'),
+  }
+}
+
+// VPC 下的全部子网（VPC 级 SNAT 降级时使用）
+export function vpcSubnets(ctx, vpc) {
+  return ctx.nodes.filter((n) => n.type === 'Subnet' && ctx.findVpc(n)?.id === vpc.id)
+}
+
+// 负载均衡的后端候选实例：直接连接的实例 + 接入的子网/VPC 内的所有实例
+export function lbBackendCandidates(ctx, lb) {
+  const set = new Map()
+  const sources = ctx.sourceNodes(lb.id)
+  for (const n of sources) {
+    if (n.type === 'Instance') set.set(n.id, n)
+  }
+  if (sources.some((n) => n.type === 'Subnet' || n.type === 'VPC')) {
+    const subnets = new Set(sources.filter((n) => n.type === 'Subnet').map((n) => n.id))
+    const vpcs = new Set(sources.filter((n) => n.type === 'VPC').map((n) => n.id))
+    for (const inst of ctx.nodes) {
+      if (inst.type !== 'Instance') continue
+      const sub = ctx.findSubnet(inst)
+      const vpc = ctx.findVpc(inst)
+      if ((sub && subnets.has(sub.id)) || (vpc && vpcs.has(vpc.id))) set.set(inst.id, inst)
+    }
+  }
+  return [...set.values()]
+}
+
+// 负载均衡的部署子网：优先接入的子网，其次接入 VPC 内的子网
+export function lbSubnets(ctx, lb) {
+  const sources = ctx.sourceNodes(lb.id)
+  const subnets = sources.filter((n) => n.type === 'Subnet')
+  if (subnets.length) return subnets
+  const result = []
+  for (const vpc of sources.filter((n) => n.type === 'VPC')) result.push(...vpcSubnets(ctx, vpc))
+  return result
+}
+
+// 负载均衡所属 VPC：直接接入的 VPC，或部署子网所属 VPC
+export function lbVpc(ctx, lb) {
+  const direct = ctx.sourceNodes(lb.id).find((n) => n.type === 'VPC')
+  if (direct) return direct
+  const sub = lbSubnets(ctx, lb)[0]
+  return sub ? ctx.findVpc(sub) : null
 }
 
 // 解析互联节点关联的 VPC 组合与两两对等连接（3 个及以上按全互联展开）
@@ -177,6 +242,65 @@ export function validateInstanceZones(nodes, edges, vendor, zonesOf) {
       region,
       sameRegion,
     })
+  }
+  return issues
+}
+
+// NAT 网关各来源类型的厂商能力：native 原生支持、subnet 降级到子网、none 不支持（仅告警）
+const GATEWAY_SOURCE_SUPPORT = {
+  aliyun: { instance: 'subnet', vpc: 'native' },
+  tencent: { instance: 'native', vpc: 'subnet' },
+  huawei: { instance: 'subnet', vpc: 'subnet' },
+  aws: { instance: 'none', vpc: 'none' },
+}
+
+// 校验网关 SNAT 来源的厂商降级情况，返回可翻译的告警项（key + params）
+export function validateGatewaySources(nodes, edges, vendor) {
+  const ctx = createCloudContext(nodes, edges, {})
+  const support = GATEWAY_SOURCE_SUPPORT[vendor] || {}
+  const issues = []
+  for (const gw of nodes.filter((n) => n.type === 'Gateway')) {
+    const { vpcs, instances } = gatewaySnatSources(ctx, gw)
+    for (const inst of instances) {
+      if (support.instance === 'subnet') {
+        const sub = ctx.findSubnet(inst)
+        issues.push(
+          sub
+            ? { key: 'export.gatewayInstanceDegraded', params: { source: clean(inst.data.name), subnet: clean(sub.data.name) } }
+            : { key: 'export.gatewayInstanceNoSubnet', params: { source: clean(inst.data.name) } }
+        )
+      } else if (support.instance === 'none') {
+        issues.push({ key: 'export.gatewaySourceIgnored', params: { source: clean(inst.data.name) } })
+      }
+    }
+    for (const vpc of vpcs) {
+      if (support.vpc === 'subnet') {
+        issues.push({ key: 'export.gatewayVpcDegraded', params: { source: clean(vpc.data.name) } })
+      } else if (support.vpc === 'none') {
+        issues.push({ key: 'export.gatewaySourceIgnored', params: { source: clean(vpc.data.name) } })
+      }
+    }
+  }
+  return issues
+}
+
+// 校验负载均衡配置：未接入网络、监听规则未选后端，返回可翻译的告警项
+export function validateLoadBalancers(nodes, edges, vendor) {
+  const ctx = createCloudContext(nodes, edges, {})
+  const issues = []
+  for (const lb of nodes.filter((n) => n.type === 'LoadBalancer')) {
+    const hasNet = ctx.sourceNodes(lb.id).some((n) => n.type === 'Subnet' || n.type === 'VPC')
+    if (!hasNet) {
+      issues.push({ key: 'export.lbNoNetwork', params: { name: clean(lb.data.name) } })
+    }
+    for (const rule of lb.data.rules || []) {
+      if (!(rule.backends || []).length) {
+        issues.push({
+          key: 'export.lbNoBackend',
+          params: { name: clean(lb.data.name), port: clean(rule.port) },
+        })
+      }
+    }
   }
   return issues
 }

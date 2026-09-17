@@ -54,8 +54,11 @@ OVN-Designer/
     │   ├── Toolbar.vue        # 顶部工具栏（厂商/Provider 版本/语言/加载示例/清空/保存/导入/导出）
     │   ├── Inspector.vue      # 右侧属性面板（只读摘要 + 编辑/删除按钮）
     │   ├── NodeEditorDialog.vue # 节点编辑弹窗（字段编辑 + 网卡/规则/路由/磁盘/输出分区）
-    │   ├── CreateHostDialog.vue # 创建宿主机对话框（填写网卡信息）
-    │   └── ExportModal.vue    # 导出结果弹窗（分组查看/复制/下载/打包 ZIP/填写凭证）
+│   ├── CreateHostDialog.vue # 创建宿主机对话框（填写网卡信息）
+│   ├── ExportModal.vue    # 导出结果弹窗（分组查看/复制/下载/打包 ZIP/填写凭证）
+│   ├── MessagePanel.vue   # 底部消息区域（连线被拒等提示，可展开/收起/清空）
+│   ├── TransferBox.vue    # 穿梭框（负载均衡后端选择，左候选/右已选）
+│   └── CanvasScrollbars.vue # 画布滚动条（与 Vue Flow 视口联动的横/纵向滑块）
     ├── export/
     │   ├── utils.js           # 通用工具：CIDR/MAC/图关系/computeZones/download/createZip
     │   ├── ovn.js             # exportOvn(nodes, edges) -> {targets, all}（按执行节点拆分）
@@ -95,6 +98,7 @@ OVN-Designer/
 | Eip             | cloud   | `name`, `bandwidth`, `internetChargeType`(payByTraffic/payByBandwidth) |
 | SecurityGroup   | cloud   | `name`, `rules[]`                                  |
 | Instance        | cloud   | `name`, `imageId`, `instanceType`, `chargeType`(subscription/payAsYouGo/spot), `privateIp`, `loginType`(keyPair/password), `keyPair`, `password`, `systemDisk{type,size}`, `dataDisks[{type,size}]` |
+| LoadBalancer    | cloud   | `name`, `internal`, `rules[{protocol, port, backends[]}]`（每条规则=监听器+后端实例 id） |
 | RouteTable      | cloud   | `name`, `routes[]`                                 |
 | Interconnect    | cloud   | `name`（VPC 对等连接，连接多个 VPC）               |
 | KeyPair         | cloud   | `name`, `mode`(create/existing)（登录密钥对，绑定实例） |
@@ -110,9 +114,16 @@ OVN-Designer/
   一个 `Cluster` 分组节点（Vue Flow parent/child），`VPC → Cluster` 连线表示 VPC 部署到该集群。
   删除 Cluster 节点会解散分组（移除内部隧道连线并还原 Host 绝对位置）。
 - `NODE_TYPES` 中 `handles: { source, target }` 控制节点左右两侧的连接点数量（默认 2/2；
-  Host 为 4/4、KeyPair 为 2/4、Interconnect 为 1/8）；`hidden: true` 的节点类型不会出现在左侧节点库。
+  Host 为 4/4、KeyPair 为 2/4、Interconnect 为 1/8；为支持一对多接入，VPC/Subnet 为 8/2、
+  Gateway/LoadBalancer 为 2/8、Instance 为 4/4）；`hidden: true` 的节点类型不会出现在左侧节点库。
+- 画布滚动条 `CanvasScrollbars`（作为 `VueFlow` 插槽子节点，与画布共用同一实例）：
+  以「所有节点包围盒 + 边距」为内容区域，横向/纵向滑块拖动即调用 `setViewport` 平移视图，
+  画布拖拽/缩放时滑块同步更新；内容未超出时滑块占满轨道（`axisGeo` 计算几何）。
 - 点击连线即删除：`App.vue` 的 `onEdgeClick` → `removeEdge`（Host↔Host 隧道连线删除后重算集群）；
   连线通过 `interactionWidth` 与 CSS 扩大可点击热区，悬停时高亮为警示色作为反馈。
+- 连线校验失败时的反馈：`onConnect` 对不合法（`canConnect` 返回空）/重复的连线，
+  通过 `pushMessage` 写入底部消息区域 `MessagePanel`（`App.vue` 的 `messages`），
+  并给出针对性建议（方向反了、ECS 需接入子网、通用连接规则说明）；不允许的连线不创建边。
 
 ### 云厂商（vendor）
 
@@ -128,6 +139,27 @@ OVN-Designer/
   导出时映射为各厂商字段（如阿里云 `instance_charge_type` + `spot_strategy`，腾讯云 `instance_charge_type`，华为云 `charging_mode`，AWS `instance_market_options`）。
 - 独立 `Eip` 节点表示公网 IP；`Eip → Instance` 连线表示绑定到该实例，导出为厂商绑定资源
   （`alicloud_eip_association` / `tencentcloud_eip_association` / `huaweicloud_compute_eip_associate` / `aws_eip_association`）。
+- `Gateway` 节点表示 NAT 网关，用于「多台 ECS 共享一个 EIP 出口」：`Eip → Gateway` 绑定公网出口，
+  来源可接 `VPC → Gateway`（整网）、`Subnet → Gateway`（按子网）或 `Instance → Gateway`（按实例），
+  再配合 `RouteTable` 的 `0.0.0.0/0 → NatGateway` 路由即可让多个 ECS 经同一 EIP SNAT 出公网。导出时：
+  - EIP 绑定网关：阿里云 `alicloud_eip_association`（`instance_type = "Nat"`）、
+    腾讯云 `tencentcloud_nat_gateway.assigned_eip_set`、华为云 SNAT 规则的 `floating_ip_id`、AWS `aws_nat_gateway.allocation_id`；
+  - SNAT 来源按厂商能力原生支持或降级（`common.js` 的 `GATEWAY_SOURCE_SUPPORT`）：
+    子网→阿里云 `alicloud_snat_entry`(source_vswitch_id)、腾讯云 `tencentcloud_nat_gateway_snat`(SUBNET)、
+    华为云 `huaweicloud_nat_snat_rule`；VPC→阿里云用 `source_cidr`（原生），腾讯云/华为云降级为 VPC 内各子网；
+    实例→腾讯云用 `NETWORKINTERFACE`（原生），阿里云/华为云降级为其实例所属子网，AWS 不支持（NAT 为子网级，仅告警）。
+  - `common.js` 的 `gatewayEips` 优先取 `Eip → Gateway` 连线，未连线时回退到未绑定实例的 EIP；
+    `gatewaySnatSources` 返回接入网关的 VPC/子网/实例，`vpcSubnets` 返回某 VPC 下的子网；
+    `validateGatewaySources` 生成降级告警（导出弹窗的 warning）。
+- `LoadBalancer` 节点表示负载均衡：可接 `Instance/Subnet/VPC → LoadBalancer`，`internal` 控制内网/公网。
+  `data.rules` 每条规则 = 一个监听器（`protocol` + `port`）+ 后端实例 id 列表；编辑器用 `TransferBox` 穿梭框选择后端，
+  候选来自 `common.js` 的 `lbBackendCandidates`（直接连接的 ECS + 接入子网/VPC 内的所有 ECS）。
+  导出按厂商生成：阿里云 `alicloud_slb_load_balancer` + `alicloud_slb_server_group` + `alicloud_slb_listener` +
+  `alicloud_slb_server_group_server_attachment`；腾讯云 `tencentcloud_clb_instance` + `tencentcloud_clb_listener` +
+  `tencentcloud_clb_attachment`；华为云 `huaweicloud_elb_loadbalancer` + `huaweicloud_elb_listener` +
+  `huaweicloud_elb_pool` + `huaweicloud_elb_member`；AWS `aws_lb`（HTTP/HTTPS 用 application，否则 network）+
+  `aws_lb_target_group` + `aws_lb_listener` + `aws_lb_target_group_attachment`。
+  `lbSubnets`/`lbVpc` 确定部署子网与 VPC；`validateLoadBalancers` 生成未接网络/未选后端的告警。
 - Instance 的「镜像」与「实例规格」为「下拉 + 可手输」控件（`combo` 字段：`select` 列出全部候选 + 「自定义…」项，
   选中后显示文本框手输；当前值不在候选列表时自动进入自定义），清单来自 `store/catalog.js`：
   以 `images.js` / `instanceTypes.js` 的本地内置清单为基底，按 `value` 合并在线清单（同项在线覆盖）。

@@ -108,6 +108,8 @@ export const NODE_TYPES = {
     category: 'cloud',
     label: 'nodes.vpc',
     badge: 'VPC',
+    // 一个 VPC 通常挂多个子网/路由表/对等连接，source 侧支持一对多
+    handles: { source: 8, target: 2 },
     defaults: (vendor) => ({
       name: 'vpc1',
       cidr: '10.0.0.0/16',
@@ -132,6 +134,8 @@ export const NODE_TYPES = {
     category: 'cloud',
     label: 'nodes.subnet',
     badge: 'VSW',
+    // 一个子网可承载多台 ECS，并连接网关/路由表，source 侧支持一对多
+    handles: { source: 8, target: 2 },
     defaults: (vendor) => ({
       name: 'vsw1',
       cidr: '10.0.1.0/24',
@@ -151,6 +155,8 @@ export const NODE_TYPES = {
     category: 'cloud',
     label: 'nodes.gateway',
     badge: 'GW',
+    // 一个 NAT 网关需接入多个子网并绑定 EIP，target 侧支持一对多
+    handles: { source: 2, target: 8 },
     defaults: () => ({
       name: 'nat1',
     }),
@@ -201,6 +207,8 @@ export const NODE_TYPES = {
     category: 'cloud',
     label: 'nodes.instance',
     badge: 'ECS',
+    // 实例可被 Subnet/Eip/KeyPair 接入，并可挂多个安全组
+    handles: { source: 4, target: 4 },
     defaults: (vendor) => ({
       name: 'ecs1',
       imageId: defaultImage(vendor),
@@ -246,6 +254,27 @@ export const NODE_TYPES = {
         ['summary.disk', dataCount ? `${sys} + ${dataCount}` : String(sys)],
       ]
     },
+  },
+  LoadBalancer: {
+    category: 'cloud',
+    label: 'nodes.loadBalancer',
+    badge: 'LB',
+    // 可接入多个 ECS/子网/VPC 作为后端来源，target 侧支持一对多
+    handles: { source: 2, target: 8 },
+    defaults: () => ({
+      name: 'lb1',
+      internal: false,
+      // 每条规则 = 一个监听器（协议+端口）+ 后端实例（穿梭框选择，存实例节点 id）
+      rules: [{ protocol: 'tcp', port: '80', backends: [] }],
+    }),
+    fields: [
+      { key: 'name', label: 'fields.name', type: 'text' },
+      { key: 'internal', label: 'fields.internal', type: 'checkbox' },
+    ],
+    summary: (d) => [
+      ['summary.listeners', String((d.rules || []).length)],
+      ['summary.type', d.internal ? 'intranet' : 'internet'],
+    ],
   },
   RouteTable: {
     category: 'cloud',
@@ -309,7 +338,13 @@ export const CONNECTION_RULES = [
   { source: 'Instance', target: 'SecurityGroup', label: 'connections.instanceToSg' },
   { source: 'KeyPair', target: 'Instance', label: 'connections.keyPairToInstance' },
   { source: 'Eip', target: 'Instance', label: 'connections.eipToInstance' },
+  { source: 'Eip', target: 'Gateway', label: 'connections.eipToGateway' },
   { source: 'Subnet', target: 'Gateway', label: 'connections.subnetToGateway' },
+  { source: 'Instance', target: 'Gateway', label: 'connections.instanceToGateway' },
+  { source: 'VPC', target: 'Gateway', label: 'connections.vpcToGateway' },
+  { source: 'Instance', target: 'LoadBalancer', label: 'connections.instanceToLb' },
+  { source: 'Subnet', target: 'LoadBalancer', label: 'connections.subnetToLb' },
+  { source: 'VPC', target: 'LoadBalancer', label: 'connections.vpcToLb' },
   { source: 'Subnet', target: 'RouteTable', label: 'connections.subnetToRouteTable' },
   { source: 'VPC', target: 'RouteTable', label: 'connections.subnetToRouteTable' },
   { source: 'VPC', target: 'Interconnect', label: 'connections.vpcToInterconnect' },

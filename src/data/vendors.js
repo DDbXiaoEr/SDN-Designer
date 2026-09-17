@@ -46,6 +46,7 @@ const CLOUD_BADGES = {
   KeyPair: { aliyun: 'KEY', tencent: 'KEY', aws: 'KEY', huawei: 'KEY' },
   RouteTable: { aliyun: 'RT', tencent: 'RT', aws: 'RT', huawei: 'RT' },
   Interconnect: { aliyun: 'PEER', tencent: 'PEER', aws: 'PEER', huawei: 'PEER' },
+  LoadBalancer: { aliyun: 'SLB', tencent: 'CLB', aws: 'ALB', huawei: 'ELB' },
 }
 
 export function nodeBadge(type, vendor) {

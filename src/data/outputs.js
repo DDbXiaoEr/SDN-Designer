@@ -16,6 +16,7 @@ const CLOUD_TYPES = [
   'Gateway',
   'Eip',
   'Instance',
+  'LoadBalancer',
   'RouteTable',
   'Interconnect',
 ]

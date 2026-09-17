@@ -1,4 +1,4 @@
-import { createCloudContext, resolveNextHopNode, resolveVpcRegion, resolveZone, instanceLoginAuth, resolveInstanceKeyPair, collectKeyPairs, resolveInterconnects, routeTablesOfVpc, hclLines, systemDiskConfig, dataDiskConfigs, clean } from './common.js'
+import { createCloudContext, resolveNextHopNode, resolveVpcRegion, resolveZone, gatewayEips, gatewaySnatSources, lbSubnets, instanceLoginAuth, resolveInstanceKeyPair, collectKeyPairs, resolveInterconnects, routeTablesOfVpc, hclLines, systemDiskConfig, dataDiskConfigs, clean } from './common.js'
 import { translate } from '../../i18n/index.js'
 import { buildOutputs } from './outputs.js'
 
@@ -12,6 +12,7 @@ const resourceTypes = {
   securityGroupRule: 'alicloud_security_group_rule',
   eip: 'alicloud_eip',
   natGateway: 'alicloud_nat_gateway',
+  loadBalancer: 'alicloud_slb_load_balancer',
   routeTable: 'alicloud_route_table',
   routeEntry: 'alicloud_route_entry',
   interconnect: 'alicloud_vpc_peer_connection',
@@ -115,6 +116,7 @@ export function exportAliyunTerraform(nodes, edges, providerVersion) {
     })
   }
 
+  let snatSeq = 0 // SNAT 条目的资源名后缀，保证多个网关/子网组合唯一
   for (const gw of nodes.filter((n) => n.type === 'Gateway')) {
     const sub = findSubnet(gw)
     const vpc = findVpc(gw)
@@ -126,6 +128,36 @@ export function exportAliyunTerraform(nodes, edges, providerVersion) {
   nat_gateway_name = "${clean(gw.data.name)}"
   nat_type         = "Enhanced"
 }`)
+    // SNAT 来源：子网按 vswitch 生成；实例降级到其实例所属子网；VPC 用 source_cidr（阿里云原生支持）
+    const eips = gatewayEips(ctx, gw)
+    const { vpcs, subnets, instances } = gatewaySnatSources(ctx, gw)
+    const vpcIds = new Set(vpcs.map((v) => v.id))
+    const snatSubnets = new Map(subnets.map((s) => [s.id, s]))
+    for (const inst of instances) {
+      const instSub = findSubnet(inst)
+      if (instSub) snatSubnets.set(instSub.id, instSub)
+    }
+    for (const snatSub of snatSubnets.values()) {
+      // 该子网所属 VPC 已接入时由 source_cidr 覆盖，避免重复/冲突的 SNAT 条目
+      const subVpc = findVpc(snatSub)
+      if (subVpc && vpcIds.has(subVpc.id)) continue
+      for (const eip of eips) {
+        blocks.push(`resource "alicloud_snat_entry" "${ctx.name(gw)}_snat_${snatSeq++}" {
+  snat_table_id     = ${ref(gw)}.snat_table_ids
+  source_vswitch_id = ${ref(snatSub)}.id
+  snat_ip           = ${ref(eip)}.ip_address
+}`)
+      }
+    }
+    for (const vpcSrc of vpcs) {
+      for (const eip of eips) {
+        blocks.push(`resource "alicloud_snat_entry" "${ctx.name(gw)}_snat_${snatSeq++}" {
+  snat_table_id = ${ref(gw)}.snat_table_ids
+  source_cidr   = "${vpcSrc.data.cidr}"
+  snat_ip       = ${ref(eip)}.ip_address
+}`)
+      }
+    }
   }
 
   for (const eip of nodes.filter((n) => n.type === 'Eip')) {
@@ -144,6 +176,63 @@ export function exportAliyunTerraform(nodes, edges, providerVersion) {
   instance_id   = ${ref(inst)}.id
 }`)
       })
+    // Eip -> Gateway：把 EIP 绑定到 NAT 网关作为公网出口（instance_type 需为 Nat）
+    ctx
+      .targetNodes(eip.id)
+      .filter((n) => n.type === 'Gateway')
+      .forEach((gw, i) => {
+        blocks.push(`resource "alicloud_eip_association" "${ctx.name(eip)}_gw_${i}" {
+  allocation_id = ${ref(eip)}.id
+  instance_id   = ${ref(gw)}.id
+  instance_type = "Nat"
+}`)
+      })
+  }
+
+  // 负载均衡：SLB 实例 + 每个监听规则一个虚拟服务器组/监听器 + 后端附件
+  for (const lb of nodes.filter((n) => n.type === 'LoadBalancer')) {
+    const sub = lbSubnets(ctx, lb)[0]
+    const rows = [
+      ['load_balancer_name', `"${clean(lb.data.name)}"`],
+      ['address_type', lb.data.internal ? '"intranet"' : '"internet"'],
+      ['load_balancer_spec', '"slb.s2.small"'],
+    ]
+    if (sub) rows.push(['vswitch_id', `${ref(sub)}.id`])
+    blocks.push(`resource "alicloud_slb_load_balancer" "${ctx.name(lb)}" {
+${hclLines(rows)}
+}`)
+    ;(lb.data.rules || []).forEach((rule, ri) => {
+      const ruleName = `${ctx.name(lb)}_${ri}`
+      const sgName = `${ruleName}_sg`
+      const port = Number(rule.port) || 80
+      const proto = String(rule.protocol || 'tcp').toLowerCase()
+      blocks.push(`resource "alicloud_slb_server_group" "${sgName}" {
+  load_balancer_id = ${ref(lb)}.id
+  name             = "${clean(lb.data.name)}-${ri}"
+}`)
+      const lrows = [
+        ['load_balancer_id', `${ref(lb)}.id`],
+        ['frontend_port', String(port)],
+        ['backend_port', String(port)],
+        ['protocol', `"${proto}"`],
+        ['server_group_id', `alicloud_slb_server_group.${sgName}.id`],
+      ]
+      // HTTPS 监听器的 bandwidth 为必填
+      if (proto === 'https') lrows.push(['bandwidth', '10'])
+      blocks.push(`resource "alicloud_slb_listener" "${ruleName}" {
+${hclLines(lrows)}
+}`)
+      ;(rule.backends || []).forEach((bid, bi) => {
+        const inst = ctx.byId.get(bid)
+        if (!inst || inst.type !== 'Instance') return
+        blocks.push(`resource "alicloud_slb_server_group_server_attachment" "${ruleName}_${bi}" {
+  server_group_id = alicloud_slb_server_group.${sgName}.id
+  server_id       = ${ref(inst)}.id
+  port            = ${port}
+  type            = "ecs"
+}`)
+      })
+    })
   }
 
   const keyPairs = collectKeyPairs(ctx, nodes)
