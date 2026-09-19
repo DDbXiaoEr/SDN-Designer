@@ -1,4 +1,4 @@
-import { createCloudContext, resolveNextHopNode, parsePortRange, resolveVpcRegion, resolveZone, gatewayEips, gatewaySnatSources, vpcSubnets, lbSubnets, lbVpc, instanceLoginAuth, resolveInstanceKeyPair, collectKeyPairs, collectExistingKeyPairs, escapeRegex, resolveInterconnects, routeTablesOfVpc, tlsKeyBlocks, hclLines, systemDiskConfig, dataDiskConfigs, clean, instanceRef, instanceCount, isCountedInstance, instancePrivateIp, instanceNameExpr, eipCount, eipRef, eipNameExpr, eipInstanceCandidates, eipBindings } from './common.js'
+import { createCloudContext, resolveNextHopNode, parsePortRange, resolveVpcRegion, resolveZone, gatewayEips, gatewaySnatSources, vpcSubnets, lbSubnets, lbVpc, lbHealthCheck, instanceLoginAuth, resolveInstanceKeyPair, collectKeyPairs, collectExistingKeyPairs, escapeRegex, resolveInterconnects, routeTablesOfVpc, tlsKeyBlocks, hclLines, systemDiskConfig, dataDiskConfigs, clean, instanceRef, instanceCount, isCountedInstance, instancePrivateIp, instanceNameExpr, eipCount, eipRef, eipNameExpr, eipInstanceCandidates, eipBindings } from './common.js'
 import { translate } from '../../i18n/index.js'
 import { buildOutputs } from './outputs.js'
 
@@ -234,11 +234,30 @@ ${hclLines(rows)}
       const ruleName = `${ctx.name(lb)}_${ri}`
       const port = Number(rule.port) || 80
       const proto = String(rule.protocol || 'tcp').toUpperCase()
+      // 健康检查：协议 http(s) 用 HTTP(S) 检查并带路径
+      const hc = lbHealthCheck(rule)
+      const hcProto = hc.protocol === 'tcp' ? 'TCP' : hc.protocol.toUpperCase()
+      const lrows = [
+        ['clb_id', `${ref(lb)}.id`],
+        ['listener_name', `"${clean(lb.data.name)}-${ri}"`],
+        ['port', String(port)],
+        ['protocol', `"${proto}"`],
+        ['health_check_switch', hc.enabled ? 'true' : 'false'],
+      ]
+      if (hc.enabled) {
+        lrows.push(['health_check_proto', `"${hcProto}"`])
+        if (hc.protocol !== 'tcp') lrows.push(['health_check_path', `"${hc.path}"`])
+        // 腾讯云 CLB 的 HTTP 健康检查请求方法仅支持 HEAD/GET
+        if (hc.protocol !== 'tcp' && ['GET', 'HEAD'].includes(hc.method)) {
+          lrows.push(['health_check_http_method', `"${hc.method}"`])
+        }
+        lrows.push(['health_check_interval_time', String(hc.interval)])
+        lrows.push(['health_check_time_out', String(hc.timeout)])
+        lrows.push(['health_check_healthy_threshold', String(hc.healthyThreshold)])
+        lrows.push(['health_check_unhealthy_threshold', String(hc.unhealthyThreshold)])
+      }
       blocks.push(`resource "tencentcloud_clb_listener" "${ruleName}" {
-  clb_id        = ${ref(lb)}.id
-  listener_name = "${clean(lb.data.name)}-${ri}"
-  port          = ${port}
-  protocol      = "${proto}"
+${hclLines(lrows)}
 }`)
       const targets = (rule.backends || [])
         .map((bid) => {

@@ -153,6 +153,33 @@ export function lbVpc(ctx, lb) {
   return sub ? ctx.findVpc(sub) : null
 }
 
+// 各厂商 HTTP 健康检查支持的「请求方法」（Terraform 资源无请求体字段，见 validateLoadBalancers）
+const LB_HEALTH_METHOD_SUPPORT = {
+  aliyun: ['GET', 'HEAD'],
+  tencent: ['GET', 'HEAD'],
+  huawei: ['GET', 'HEAD', 'POST'],
+  // AWS 目标组不暴露请求方法；GET 为其隐含默认，保持不告警
+  aws: ['GET'],
+}
+
+// 监听规则的健康检查配置：归一化并回退默认值（兼容缺少 healthCheck 的旧设计）
+export function lbHealthCheck(rule) {
+  const h = (rule && rule.healthCheck) || {}
+  const num = (v, d) => (Number(v) > 0 ? Number(v) : d)
+  return {
+    enabled: h.enabled !== false,
+    protocol: String(h.protocol || 'tcp').toLowerCase(),
+    method: String(h.method || 'GET').toUpperCase(),
+    path: clean(h.path) || '/',
+    body: clean(h.body),
+    port: clean(h.port),
+    interval: num(h.interval, 5),
+    timeout: num(h.timeout, 2),
+    healthyThreshold: num(h.healthyThreshold, 3),
+    unhealthyThreshold: num(h.unhealthyThreshold, 3),
+  }
+}
+
 // 解析互联节点关联的 VPC 组合与两两对等连接（3 个及以上按全互联展开）
 export function resolveInterconnects(ctx) {
   const { nodes, sourceNodes } = ctx
@@ -453,6 +480,21 @@ export function validateLoadBalancers(nodes, edges, vendor) {
         issues.push({
           key: 'export.lbNoBackend',
           params: { name: clean(lb.data.name), port: clean(rule.port) },
+        })
+      }
+      // HTTP(S) 健康检查的请求方法/请求体：请求体各厂商均无对应字段，方法超出厂商支持范围时提示
+      const hc = lbHealthCheck(rule)
+      if (!hc.enabled || hc.protocol === 'tcp') continue
+      if (hc.body) {
+        issues.push({
+          key: 'export.lbHealthBodyUnsupported',
+          params: { name: clean(lb.data.name), port: clean(rule.port) },
+        })
+      }
+      if (!(LB_HEALTH_METHOD_SUPPORT[vendor] || []).includes(hc.method)) {
+        issues.push({
+          key: 'export.lbHealthMethodUnsupported',
+          params: { name: clean(lb.data.name), port: clean(rule.port), method: hc.method },
         })
       }
     }

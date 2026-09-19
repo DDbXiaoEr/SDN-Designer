@@ -101,8 +101,8 @@ function connectionHint(source, target) {
 }
 
 // 载入内置示例拓扑；边标签按当前语言从连接规则解析
-function applyDemo() {
-  const { nodes: demoNodes, edges: demoEdges } = createDemoDesign()
+function applyDemo(key = 'basic') {
+  const { nodes: demoNodes, edges: demoEdges } = createDemoDesign(key)
   const withLabels = demoEdges.map((e) => {
     const source = demoNodes.find((n) => n.id === e.source)
     const target = demoNodes.find((n) => n.id === e.target)
@@ -115,9 +115,9 @@ function applyDemo() {
 }
 
 // 工具栏按钮：画布非空时先确认，避免覆盖现有设计
-function onLoadDemo() {
+function onLoadDemo(key) {
   if (nodes.value.length && !window.confirm(t('toolbar.loadDemoConfirm'))) return
-  applyDemo()
+  applyDemo(key)
 }
 
 // 首次访问（从未保存过设计）时展示示例；用户清空后的空设计不会再次触发

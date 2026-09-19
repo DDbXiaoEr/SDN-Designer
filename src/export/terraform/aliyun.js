@@ -1,4 +1,4 @@
-import { createCloudContext, resolveNextHopNode, resolveVpcRegion, resolveZone, gatewayEips, gatewaySnatSources, lbSubnets, instanceLoginAuth, resolveInstanceKeyPair, collectKeyPairs, resolveInterconnects, routeTablesOfVpc, hclLines, systemDiskConfig, dataDiskConfigs, clean, instanceRef, instanceCount, isCountedInstance, instancePrivateIp, instanceNameExpr, eipCount, eipRef, eipNameExpr, eipInstanceCandidates, eipBindings } from './common.js'
+import { createCloudContext, resolveNextHopNode, resolveVpcRegion, resolveZone, gatewayEips, gatewaySnatSources, lbSubnets, lbHealthCheck, instanceLoginAuth, resolveInstanceKeyPair, collectKeyPairs, resolveInterconnects, routeTablesOfVpc, hclLines, systemDiskConfig, dataDiskConfigs, clean, instanceRef, instanceCount, isCountedInstance, instancePrivateIp, instanceNameExpr, eipCount, eipRef, eipNameExpr, eipInstanceCandidates, eipBindings } from './common.js'
 import { translate } from '../../i18n/index.js'
 import { buildOutputs } from './outputs.js'
 
@@ -171,7 +171,7 @@ export function exportAliyunTerraform(nodes, edges, providerVersion) {
       ...(isCountedInstance(eip)
         ? [
             ['count', String(eipCount(eip))],
-            ['eip_name', eipNameExpr(eip)],
+            ['name', eipNameExpr(eip)],
           ]
         : []),
       ['bandwidth', `"${eip.data.bandwidth}"`],
@@ -236,6 +236,25 @@ ${hclLines(rows)}
       ]
       // HTTPS 监听器的 bandwidth 为必填
       if (proto === 'https') lrows.push(['bandwidth', '10'])
+      // 健康检查：协议 http(s) 用 http 检查并带路径，tcp 用 tcp 检查
+      const hc = lbHealthCheck(rule)
+      if (hc.enabled) {
+        const hcHttp = hc.protocol !== 'tcp'
+        lrows.push(['health_check', '"on"'])
+        lrows.push(['health_check_type', hcHttp ? '"http"' : '"tcp"'])
+        if (hcHttp) lrows.push(['health_check_uri', `"${hc.path}"`])
+        // 阿里云 SLB 的 HTTP 健康检查请求方法仅支持 head/get
+        if (hcHttp && ['GET', 'HEAD'].includes(hc.method)) {
+          lrows.push(['health_check_method', `"${hc.method.toLowerCase()}"`])
+        }
+        if (/^\d+$/.test(hc.port)) lrows.push(['health_check_connect_port', hc.port])
+        lrows.push(['healthy_threshold', String(hc.healthyThreshold)])
+        lrows.push(['unhealthy_threshold', String(hc.unhealthyThreshold)])
+        lrows.push(['health_check_timeout', String(hc.timeout)])
+        lrows.push(['health_check_interval', String(hc.interval)])
+      } else {
+        lrows.push(['health_check', '"off"'])
+      }
       blocks.push(`resource "alicloud_slb_listener" "${ruleName}" {
 ${hclLines(lrows)}
 }`)

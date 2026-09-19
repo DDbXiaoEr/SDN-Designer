@@ -1,4 +1,4 @@
-import { createCloudContext, resolveNextHopNode, parsePortRange, resolveVpcRegion, resolveZone, gatewayEips, lbSubnets, lbVpc, instanceLoginAuth, resolveInstanceKeyPair, collectKeyPairs, resolveInterconnects, routeTablesOfVpc, tlsKeyBlocks, hclLines, systemDiskConfig, dataDiskConfigs, clean, instanceRef, instanceCount, isCountedInstance, instancePrivateIp, instanceNameExpr, eipCount, eipRef, eipNameExpr, eipInstanceCandidates, eipBindings } from './common.js'
+import { createCloudContext, resolveNextHopNode, parsePortRange, resolveVpcRegion, resolveZone, gatewayEips, lbSubnets, lbVpc, lbHealthCheck, instanceLoginAuth, resolveInstanceKeyPair, collectKeyPairs, resolveInterconnects, routeTablesOfVpc, tlsKeyBlocks, hclLines, systemDiskConfig, dataDiskConfigs, clean, instanceRef, instanceCount, isCountedInstance, instancePrivateIp, instanceNameExpr, eipCount, eipRef, eipNameExpr, eipInstanceCandidates, eipBindings } from './common.js'
 import { translate } from '../../i18n/index.js'
 import { buildOutputs } from './outputs.js'
 
@@ -182,12 +182,33 @@ ${hclLines(rows)}
       const port = Number(rule.port) || 80
       const proto = String(rule.protocol || 'tcp').toUpperCase()
       const tgName = `${ruleName}_tg`
+      // 健康检查：AWS 目标组强制启用，故仅能配置参数；协议 http(s) 带路径与状态码匹配
+      const hc = lbHealthCheck(rule)
+      const hcProto = hc.protocol === 'tcp' ? 'TCP' : hc.protocol.toUpperCase()
+      const hcRows = [
+        ['healthy_threshold', String(hc.healthyThreshold)],
+        ['unhealthy_threshold', String(hc.unhealthyThreshold)],
+        ['timeout', String(hc.timeout)],
+        ['interval', String(hc.interval)],
+        ['protocol', `"${hcProto}"`],
+      ]
+      if (hc.port) hcRows.push(['port', `"${hc.port}"`])
+      if (hc.protocol !== 'tcp') {
+        hcRows.push(['path', `"${hc.path}"`])
+        hcRows.push(['matcher', '"200"'])
+      }
+      const hcBlock = hc.enabled
+        ? `\n\n  health_check {\n${hclLines(hcRows)
+            .split('\n')
+            .map((l) => `  ${l}`)
+            .join('\n')}\n  }`
+        : `\n\n  # ${tt('lbHealthCheckForced')}`
       blocks.push(`resource "aws_lb_target_group" "${tgName}" {
   name        = "${clean(lb.data.name)}-${ri}"
   port        = ${port}
   protocol    = "${proto}"
   target_type = "instance"
-  vpc_id      = ${vpc ? `${ref(vpc)}.id` : `"" # ${tt('unassociatedVpc')}`}
+  vpc_id      = ${vpc ? `${ref(vpc)}.id` : `"" # ${tt('unassociatedVpc')}`}${hcBlock}
 }`)
       ;(rule.backends || []).forEach((bid, bi) => {
         // 解析 bid 格式：可能是 "instId" 或 "instId#index"（多实例展开后）

@@ -276,8 +276,28 @@ export const NODE_TYPES = {
     defaults: () => ({
       name: 'lb1',
       internal: false,
-      // 每条规则 = 一个监听器（协议+端口）+ 后端实例（穿梭框选择，存实例节点 id）
-      rules: [{ protocol: 'tcp', port: '80', backends: [] }],
+      // 每条规则 = 一个监听器（协议+端口）+ 后端实例（穿梭框选择，存实例节点 id）+ 健康检查
+      rules: [
+        {
+          protocol: 'tcp',
+          port: '80',
+          backends: [],
+          // 健康检查：protocol 为检查协议（tcp/http/https），port 留空表示用后端端口；
+          // method/body 仅 HTTP(S) 检查适用（请求体各厂商 Terraform 资源均不支持，导出时告警）
+          healthCheck: {
+            enabled: true,
+            protocol: 'tcp',
+            method: 'GET',
+            path: '/',
+            body: '',
+            port: '',
+            interval: 5,
+            timeout: 2,
+            healthyThreshold: 3,
+            unhealthyThreshold: 3,
+          },
+        },
+      ],
     }),
     fields: [
       { key: 'name', label: 'fields.name', type: 'text' },

@@ -1,4 +1,4 @@
-import { createCloudContext, resolveNextHopNode, parsePortRange, resolveVpcRegion, resolveZone, gatewayEips, gatewaySnatSources, vpcSubnets, lbSubnets, lbVpc, instanceLoginAuth, resolveInstanceKeyPair, collectKeyPairs, resolveInterconnects, routeTablesOfVpc, tlsKeyBlocks, hclLines, systemDiskConfig, dataDiskConfigs, clean, instanceRef, instanceCount, isCountedInstance, instancePrivateIp, instancePrivateIpAt, instanceNameExpr, eipCount, eipRef, eipNameExpr, eipInstanceCandidates, eipBindings } from './common.js'
+import { createCloudContext, resolveNextHopNode, parsePortRange, resolveVpcRegion, resolveZone, gatewayEips, gatewaySnatSources, vpcSubnets, lbSubnets, lbVpc, lbHealthCheck, instanceLoginAuth, resolveInstanceKeyPair, collectKeyPairs, resolveInterconnects, routeTablesOfVpc, tlsKeyBlocks, hclLines, systemDiskConfig, dataDiskConfigs, clean, instanceRef, instanceCount, isCountedInstance, instancePrivateIp, instancePrivateIpAt, instanceNameExpr, eipCount, eipRef, eipNameExpr, eipInstanceCandidates, eipBindings } from './common.js'
 import { parseCidr } from '../utils.js'
 import { translate } from '../../i18n/index.js'
 import { buildOutputs } from './outputs.js'
@@ -242,6 +242,27 @@ ${hclLines(rows)}
   loadbalancer_id = ${ref(lb)}.id
   vpc_id          = ${vpc ? `${ref(vpc)}.id` : `"" # ${tt('unassociatedVpc')}`}
 }`)
+      // 健康检查：华为云为独立 monitor 资源，http(s) 检查带路径
+      const hc = lbHealthCheck(rule)
+      if (hc.enabled) {
+        const hcProto = hc.protocol === 'tcp' ? 'TCP' : hc.protocol.toUpperCase()
+        const hrows = [
+          ['pool_id', `huaweicloud_elb_pool.${poolName}.id`],
+          ['type', `"${hcProto}"`],
+          ['delay', String(hc.interval)],
+          ['timeout', String(hc.timeout)],
+          ['max_retries', String(hc.unhealthyThreshold)],
+        ]
+        if (hc.protocol !== 'tcp') hrows.push(['url_path', `"${hc.path}"`])
+        // 华为云 ELB 的 HTTP 健康检查请求方法支持 GET/HEAD/POST
+        if (hc.protocol !== 'tcp' && ['GET', 'HEAD', 'POST'].includes(hc.method)) {
+          hrows.push(['http_method', `"${hc.method}"`])
+        }
+        if (/^\d+$/.test(hc.port)) hrows.push(['monitor_port', hc.port])
+        blocks.push(`resource "huaweicloud_elb_monitor" "${ruleName}_monitor" {
+${hclLines(hrows)}
+}`)
+      }
       ;(rule.backends || []).forEach((bid, bi) => {
         // 解析 bid 格式：可能是 "instId" 或 "instId#index"（多实例展开后）
         const [instId, indexStr] = bid.split('#')

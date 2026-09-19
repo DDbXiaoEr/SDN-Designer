@@ -8,7 +8,7 @@ import { nodeLabelKey } from '../data/vendors.js'
 import { vendor } from '../store/vendor.js'
 import { useDesigner } from '../store/designer.js'
 import { instanceTypeZones } from '../store/catalog.js'
-import { resolveZone, validateInstanceZones, createCloudContext, lbBackendCandidates, instanceCount, eipInstanceCandidates, eipBindings } from '../export/terraform/common.js'
+import { resolveZone, validateInstanceZones, createCloudContext, lbBackendCandidates, lbHealthCheck, instanceCount, eipInstanceCandidates, eipBindings } from '../export/terraform/common.js'
 import TransferBox from './TransferBox.vue'
 
 const props = defineProps({
@@ -127,7 +127,7 @@ function setEipBinding(i, value) {
 
 function addLbRule() {
   const rules = [...(node.value.data.rules || [])]
-  rules.push({ protocol: 'tcp', port: '80', backends: [] })
+  rules.push({ protocol: 'tcp', port: '80', backends: [], healthCheck: lbHealthCheck({}) })
   patch('rules', rules)
 }
 function removeLbRule(i) {
@@ -138,6 +138,23 @@ function removeLbRule(i) {
 function lbRulePatch(i, key, value) {
   const rules = [...(node.value.data.rules || [])]
   rules[i] = { ...rules[i], [key]: value }
+  patch('rules', rules)
+}
+
+// 回显监听规则的健康检查（含默认值回退）
+function lbHealth(rule) {
+  return lbHealthCheck(rule)
+}
+// 修改某条监听规则的健康检查，仅写回 healthCheck 字段
+function lbHealthPatch(i, key, value) {
+  const rules = [...(node.value.data.rules || [])]
+  const hc = { ...lbHealthCheck(rules[i]) }
+  if (['enabled', 'protocol', 'method', 'path', 'body', 'port'].includes(key)) {
+    hc[key] = value
+  } else {
+    hc[key] = Number(value) || 0
+  }
+  rules[i] = { ...rules[i], healthCheck: hc }
   patch('rules', rules)
 }
 
@@ -511,6 +528,89 @@ function toggleOutput(key, checked) {
               :right-title="t('inspector.lbSelected')"
               @update:model-value="lbRulePatch(i, 'backends', $event)"
             />
+            <div class="hc">
+              <label class="hc-head">
+                <input
+                  type="checkbox"
+                  :checked="lbHealth(rule).enabled"
+                  @change="lbHealthPatch(i, 'enabled', $event.target.checked)"
+                />
+                {{ t('inspector.lbHealthCheckTitle') }}
+              </label>
+              <template v-if="lbHealth(rule).enabled">
+                <div class="hc-grid">
+                  <label class="hc-field">
+                    <span>{{ t('inspector.lbHealthProtocol') }}</span>
+                    <select :value="lbHealth(rule).protocol" @change="lbHealthPatch(i, 'protocol', $event.target.value)">
+                      <option value="tcp">TCP</option>
+                      <option value="http">HTTP</option>
+                      <option value="https">HTTPS</option>
+                    </select>
+                  </label>
+                  <label class="hc-field">
+                    <span>{{ t('inspector.lbHealthPath') }}</span>
+                    <input :value="lbHealth(rule).path" @input="lbHealthPatch(i, 'path', $event.target.value)" />
+                  </label>
+                  <label v-if="lbHealth(rule).protocol !== 'tcp'" class="hc-field">
+                    <span>{{ t('inspector.lbHealthMethod') }}</span>
+                    <select :value="lbHealth(rule).method" @change="lbHealthPatch(i, 'method', $event.target.value)">
+                      <option value="GET">GET</option>
+                      <option value="HEAD">HEAD</option>
+                      <option value="POST">POST</option>
+                    </select>
+                  </label>
+                  <label v-if="lbHealth(rule).protocol !== 'tcp'" class="hc-field wide">
+                    <span>{{ t('inspector.lbHealthBody') }}</span>
+                    <input
+                      :placeholder="t('inspector.lbHealthBodyPlaceholder')"
+                      :value="lbHealth(rule).body"
+                      @input="lbHealthPatch(i, 'body', $event.target.value)"
+                    />
+                  </label>
+                  <label class="hc-field">
+                    <span>{{ t('inspector.lbHealthPort') }}</span>
+                    <input :value="lbHealth(rule).port" @input="lbHealthPatch(i, 'port', $event.target.value)" />
+                  </label>
+                  <label class="hc-field">
+                    <span>{{ t('inspector.lbHealthInterval') }}</span>
+                    <input
+                      type="number"
+                      min="1"
+                      :value="lbHealth(rule).interval"
+                      @input="lbHealthPatch(i, 'interval', $event.target.value)"
+                    />
+                  </label>
+                  <label class="hc-field">
+                    <span>{{ t('inspector.lbHealthTimeout') }}</span>
+                    <input
+                      type="number"
+                      min="1"
+                      :value="lbHealth(rule).timeout"
+                      @input="lbHealthPatch(i, 'timeout', $event.target.value)"
+                    />
+                  </label>
+                  <label class="hc-field">
+                    <span>{{ t('inspector.lbHealthHealthy') }}</span>
+                    <input
+                      type="number"
+                      min="1"
+                      :value="lbHealth(rule).healthyThreshold"
+                      @input="lbHealthPatch(i, 'healthyThreshold', $event.target.value)"
+                    />
+                  </label>
+                  <label class="hc-field">
+                    <span>{{ t('inspector.lbHealthUnhealthy') }}</span>
+                    <input
+                      type="number"
+                      min="1"
+                      :value="lbHealth(rule).unhealthyThreshold"
+                      @input="lbHealthPatch(i, 'unhealthyThreshold', $event.target.value)"
+                    />
+                  </label>
+                </div>
+                <p class="section-hint">{{ t('inspector.lbHealthHint') }}</p>
+              </template>
+            </div>
             <button class="mini danger" @click="removeLbRule(i)">{{ t('common.delete') }}</button>
           </div>
           <button class="add" @click="addLbRule">{{ t('inspector.lbAddRule') }}</button>
@@ -705,6 +805,38 @@ function toggleOutput(key, checked) {
 .rule-row > * {
   flex: 1;
   min-width: 0;
+}
+.hc {
+  border: 1px dashed var(--border);
+  border-radius: 6px;
+  padding: 6px 8px;
+}
+.hc-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--text-dim);
+  cursor: pointer;
+}
+.hc-head input {
+  width: auto;
+}
+.hc-grid {
+  margin-top: 6px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+}
+.hc-field {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 10px;
+  color: var(--text-dim);
+}
+.hc-field.wide {
+  grid-column: 1 / -1;
 }
 .nic-tunnel {
   display: flex;

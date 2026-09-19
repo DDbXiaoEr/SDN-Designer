@@ -38,7 +38,7 @@ OVN-Designer/
     │   ├── chargeTypes.js     # 各云厂商实例计费方式（包年包月/按量付费/抢占式）
     │   ├── disks.js           # 各云厂商云盘类型（系统盘/数据盘）
     │   ├── outputs.js         # 云资源「创建后可获取」属性（资源 ID/公网 IP）
-    │   ├── demo.js            # 内置示例拓扑（首次访问自动加载，工具栏可重新载入）
+    │   ├── demo.js            # 内置示例拓扑（多套：基础/负载均衡；首次访问自动加载基础示例，工具栏下拉切换）
     │   ├── images.js          # 各云厂商本地内置镜像列表（在线清单兜底）
     │   └── instanceTypes.js   # 各云厂商本地内置实例规格列表（在线清单兜底）
     ├── store/
@@ -101,7 +101,7 @@ OVN-Designer/
 | Eip             | cloud   | `name`, `count`(数量，>1 表示多个公网 IP，导出为 Terraform `count`), `bandwidth`, `internetChargeType`(payByTraffic/payByBandwidth), `bindings{序号:{id,index}\|null}`（按 EIP 序号记录绑定，兼容旧 `{实例节点id:序号}`） |
 | SecurityGroup   | cloud   | `name`, `rules[]`                                  |
 | Instance        | cloud   | `name`, `count`(数量，>1 表示多台同规格实例，导出为 Terraform `count`), `imageId`, `instanceType`, `chargeType`(subscription/payAsYouGo/spot), `privateIp`, `loginType`(keyPair/password), `keyPair`, `password`, `systemDisk{type,size}`, `dataDisks[{type,size}]` |
-| LoadBalancer    | cloud   | `name`, `internal`, `rules[{protocol, port, backends[]}]`（每条规则=监听器+后端实例 id） |
+| LoadBalancer    | cloud   | `name`, `internal`, `rules[{protocol, port, backends[], healthCheck{enabled,protocol,method,path,body,port,interval,timeout,healthyThreshold,unhealthyThreshold}}]`（每条规则=监听器+后端实例 id+健康检查） |
 | RouteTable      | cloud   | `name`, `routes[]`                                 |
 | Interconnect    | cloud   | `name`（VPC 对等连接，连接多个 VPC）               |
 | KeyPair         | cloud   | `name`, `mode`(create/existing)（登录密钥对，绑定实例） |
@@ -183,11 +183,18 @@ OVN-Designer/
 - `LoadBalancer` 节点表示负载均衡：可接 `Instance/Subnet/VPC → LoadBalancer`，`internal` 控制内网/公网。
   `data.rules` 每条规则 = 一个监听器（`protocol` + `port`）+ 后端实例 id 列表；编辑器用 `TransferBox` 穿梭框选择后端，
   候选来自 `common.js` 的 `lbBackendCandidates`（直接连接的 ECS + 接入子网/VPC 内的所有 ECS）。
-  导出按厂商生成：阿里云 `alicloud_slb_load_balancer` + `alicloud_slb_server_group` + `alicloud_slb_listener` +
-  `alicloud_slb_server_group_server_attachment`；腾讯云 `tencentcloud_clb_instance` + `tencentcloud_clb_listener` +
+  每条监听规则还带 `healthCheck`（`common.js` 的 `lbHealthCheck` 归一化并回退默认值，兼容旧设计）：
+  `enabled`（启用）、`protocol`（tcp/http/https）、`method`（HTTP(S) 请求方法，GET/HEAD/POST）、
+  `path`（HTTP(S) 检查路径）、`body`（HTTP(S) 请求体）、`port`（留空用后端端口）、
+  `interval`/`timeout`（秒）、`healthyThreshold`/`unhealthyThreshold`。`method` 仅在检查协议为 http/https 时于编辑器显示，
+  导出按厂商能力映射（阿里云 SLB `health_check_method` 仅 head/get、腾讯云 CLB `health_check_http_method` 仅 GET/HEAD、
+  华为云 ELB `http_method` 支持 GET/HEAD/POST、AWS 目标组无方法字段）；`body` 各厂商 Terraform 资源均无对应字段，
+  导出时由 `validateLoadBalancers` 生成忽略告警（超出厂商支持的 `method` 同样告警）。
+  导出按厂商生成：阿里云 `alicloud_slb_load_balancer` + `alicloud_slb_server_group` + `alicloud_slb_listener`（`health_check_*`）+
+  `alicloud_slb_server_group_server_attachment`；腾讯云 `tencentcloud_clb_instance` + `tencentcloud_clb_listener`（`health_check_*`）+
   `tencentcloud_clb_attachment`；华为云 `huaweicloud_elb_loadbalancer` + `huaweicloud_elb_listener` +
-  `huaweicloud_elb_pool` + `huaweicloud_elb_member`；AWS `aws_lb`（HTTP/HTTPS 用 application，否则 network）+
-  `aws_lb_target_group` + `aws_lb_listener` + `aws_lb_target_group_attachment`。
+  `huaweicloud_elb_pool` + `huaweicloud_elb_member` + `huaweicloud_elb_monitor`；AWS `aws_lb`（HTTP/HTTPS 用 application，否则 network）+
+  `aws_lb_target_group`（`health_check` 块，AWS 强制启用）+ `aws_lb_listener` + `aws_lb_target_group_attachment`。
   `lbSubnets`/`lbVpc` 确定部署子网与 VPC；`validateLoadBalancers` 生成未接网络/未选后端的告警。
 - Instance 的「镜像」与「实例规格」为「下拉 + 可手输」控件（`combo` 字段：`select` 列出全部候选 + 「自定义…」项，
   选中后显示文本框手输；当前值不在候选列表时自动进入自定义），清单来自 `store/catalog.js`：
@@ -225,8 +232,10 @@ OVN-Designer/
   导出优先使用节点；未连线时回退到内联 `keyPair`（兼容旧设计），密码登录不受影响。
 - 节点属性编辑在 `NodeEditorDialog` 弹窗中完成：双击节点或点击右侧面板的「编辑」打开；
   `Inspector` 仅显示只读摘要与编辑/删除按钮。
-- 内置示例拓扑定义于 `data/demo.js`（`createDemoDesign()` 返回深拷贝）；首次访问（无本地保存设计）
-  自动加载，工具栏「加载示例」可随时重新载入（画布非空时先确认）；边的标签在加载时按当前语言解析。
+- 内置示例拓扑定义于 `data/demo.js`：`DEMOS` 按 key 提供多套示例（`basic` 基础、`loadbalancer` 负载均衡），
+  `DEMO_LIST` 为工具栏下拉顺序，`createDemoDesign(key)` 返回对应示例深拷贝（缺省 `basic`）；
+  首次访问（无本地保存设计）自动加载 `basic`，工具栏「加载示例」下拉可切换（画布非空时先确认）；
+  边的标签在加载时按当前语言解析。示例名称走 i18n 的 `toolbar.demo_<key>`。
 
 ### OVN 导出（按执行节点拆分）
 

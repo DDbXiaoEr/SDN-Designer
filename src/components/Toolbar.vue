@@ -1,7 +1,9 @@
 <script setup>
+import { ref, onMounted, onBeforeUnmount } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { setLocale, SUPPORTED_LOCALES } from '../i18n/index.js'
 import { VENDORS } from '../data/vendors.js'
+import { DEMO_LIST } from '../data/demo.js'
 import { vendor, providerVersion, setProviderVersion } from '../store/vendor.js'
 import { providerVersionOptions } from '../store/providerVersions.js'
 import ProviderVersionSelect from './ProviderVersionSelect.vue'
@@ -13,6 +15,19 @@ defineProps({
 const emit = defineEmits(['export-ovn', 'export-terraform', 'clear', 'save-design', 'import-design', 'load-demo', 'change-vendor'])
 
 const { t, locale } = useI18n()
+
+// 示例下拉：选择具体示例后携带 key 触发加载
+const demoMenu = ref(null)
+const demoOpen = ref(false)
+function onPickDemo(key) {
+  demoOpen.value = false
+  emit('load-demo', key)
+}
+function onDocClick(e) {
+  if (demoOpen.value && demoMenu.value && !demoMenu.value.contains(e.target)) demoOpen.value = false
+}
+onMounted(() => document.addEventListener('click', onDocClick))
+onBeforeUnmount(() => document.removeEventListener('click', onDocClick))
 
 function switchLocale() {
   const idx = SUPPORTED_LOCALES.indexOf(locale.value)
@@ -50,7 +65,14 @@ function onProviderVersionChange(value) {
         />
       </label>
       <button class="ghost" @click="switchLocale">{{ t('toolbar.language') }}: {{ locale }}</button>
-      <button class="ghost" @click="emit('load-demo')">{{ t('toolbar.loadDemo') }}</button>
+      <div ref="demoMenu" class="demo-menu">
+        <button class="ghost" @click="demoOpen = !demoOpen">{{ t('toolbar.loadDemo') }} ▾</button>
+        <div v-if="demoOpen" class="demo-list">
+          <button v-for="d in DEMO_LIST" :key="d" class="demo-item" @click="onPickDemo(d)">
+            {{ t(`toolbar.demo_${d}`) }}
+          </button>
+        </div>
+      </div>
       <button class="ghost" @click="emit('clear')">{{ t('toolbar.clear') }}</button>
       <button class="ghost" @click="emit('save-design')">{{ t('toolbar.saveDesign') }}</button>
       <button class="ghost" @click="emit('import-design')">{{ t('toolbar.importDesign') }}</button>
@@ -135,5 +157,33 @@ button.ghost {
   font-size: 12px;
   color: var(--text-dim);
   white-space: nowrap;
+}
+.demo-menu {
+  position: relative;
+}
+.demo-list {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 6px);
+  min-width: 150px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 4px;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+  z-index: 30;
+}
+.demo-item {
+  border: none;
+  background: transparent;
+  text-align: left;
+  padding: 7px 10px;
+  border-radius: 6px;
+}
+.demo-item:hover {
+  background: var(--panel);
 }
 </style>
