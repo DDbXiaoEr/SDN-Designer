@@ -16,6 +16,8 @@ Go + Gin 实现的云厂商清单代理：按地域拉取**镜像**与**实例�
 | GET | `/api/vendors` | 支持的厂商与 kind |
 | GET | `/api/:kind/:vendor` | 使用厂商默认地域，或用 `?region=` 指定 |
 | GET | `/api/:kind/:vendor/:region` | 指定地域 |
+| GET | `/api/providerVersions` | 各厂商 Terraform provider 已发布版本（从 Registry 拉取） |
+| GET | `/api/providerVersions/:vendor` | 单个厂商的已发布版本 |
 
 - `kind`：`images` 或 `instanceTypes`
 - `vendor`：`tencent` / `aliyun` / `aws` / `huawei`
@@ -36,6 +38,20 @@ Go + Gin 实现的云厂商清单代理：按地域拉取**镜像**与**实例�
 
 `zones` 为该规格有货的可用区（完整 AZ ID），缺省表示不限制，可直接对接前端的可用区库存校验。
 
+provider 版本响应（`source` 为 `registry` 或 `mock`，`versions` 按版本号从新到旧排序）：
+
+```json
+{
+  "vendor": "aliyun",
+  "source": "registry",
+  "versions": ["1.220.0", "1.219.0", "1.218.0"]
+}
+```
+
+- 厂商 → Registry provider 地址：`aliyun`→`aliyun/alicloud`、`tencent`→`tencentcloudstack/tencentcloud`、
+  `aws`→`hashicorp/aws`、`huawei`→`huaweicloud/huaweicloud`。
+- 无需云厂商凭证，结果按 `cache_ttl` 缓存；`mock: true` 时返回内置示例版本，不访问外网。
+
 ## 配置
 
 配置来自 **YAML 文件**：复制 `config.example.yaml` 为 `config.yaml` 填写即可（`config.yaml` 已被忽略，不会入库）。
@@ -48,6 +64,7 @@ server:
   cache_ttl: 10m          # 结果缓存时长，0 表示不缓存
   request_timeout: 20s    # 调用厂商 API 超时
   cors_allowed_origins: ["*"]
+  registry_url: "https://registry.terraform.io"  # Terraform Registry，可指向私有镜像
   mock: false             # true 时所有厂商返回示例数据，便于无凭证联调
 
 vendors:
@@ -63,7 +80,7 @@ vendors:
 | --- | --- |
 | `CONFIG_FILE` / `-config` | 配置文件路径 |
 | `PORT` / `CACHE_TTL` / `REQUEST_TIMEOUT` | `server.*` |
-| `CORS_ALLOWED_ORIGINS` / `MOCK` | `server.*` |
+| `CORS_ALLOWED_ORIGINS` / `REGISTRY_URL` / `MOCK` | `server.*` |
 | `TENCENT_ENABLED` / `TENCENT_SECRET_ID` / `TENCENT_SECRET_KEY` | `vendors.tencent` |
 | `ALIYUN_ENABLED` / `ALIYUN_ACCESS_KEY_ID` / `ALIYUN_ACCESS_KEY_SECRET` | `vendors.aliyun` |
 | `AWS_ENABLED` / `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` | `vendors.aws` |
@@ -88,9 +105,12 @@ go build -o server . && ./server
 
 ```
 VITE_CATALOG_API_URL=http://localhost:8080/api/{kind}/{vendor}
+VITE_PROVIDER_VERSIONS_URL=http://localhost:8080/api/providerVersions/{vendor}
 ```
 
 未指定地域时使用厂商默认地域；要按 VPC 地域拉取，前端需在模板中加入 `{region}`（后续接入）。
+`VITE_PROVIDER_VERSIONS_URL` 用于工具栏「Provider 版本」下拉的候选（`{vendor}` 占位符可选）；
+下拉始终列出全部版本并支持搜索，选中后生成 `~> 主.次` 约束（仍可手动输入任意约束）。
 
 ## 版本说明
 

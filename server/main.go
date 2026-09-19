@@ -17,6 +17,7 @@ import (
 	"ovndesigner/server/internal/catalog"
 	"ovndesigner/server/internal/config"
 	"ovndesigner/server/internal/provider"
+	"ovndesigner/server/internal/tfversion"
 )
 
 func main() {
@@ -24,6 +25,8 @@ func main() {
 
 	providers := provider.Build(cfg)
 	handler := catalog.NewHandler(providers, cfg.CacheTTL)
+	// Terraform provider 版本清单（公开 Registry，无需凭证，mock 模式返回示例）
+	tfVersions := tfversion.NewHandler(cfg.RegistryURL, cfg.CacheTTL, cfg.RequestTimeout, cfg.Mock)
 
 	gin.SetMode(gin.ReleaseMode)
 	r := gin.New()
@@ -38,6 +41,7 @@ func main() {
 		})
 	})
 	handler.Register(r)
+	tfVersions.Register(r)
 
 	srv := &http.Server{Addr: ":" + cfg.Port, Handler: r}
 

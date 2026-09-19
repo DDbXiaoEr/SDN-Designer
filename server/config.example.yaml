@@ -14,7 +14,9 @@ server:
   # 允许的跨域来源；* 表示全部
   cors_allowed_origins:
     - "*"
-  # 无凭证联调：true 时所有厂商返回示例数据
+  # Terraform Registry 地址，用于获取各厂商 provider 已发布版本；可指向私有镜像
+  registry_url: "https://registry.terraform.io"
+  # 无凭证联调：true 时所有厂商返回示例数据（provider 版本返回内置示例）
   mock: false
 
 vendors:

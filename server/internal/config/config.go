@@ -42,6 +42,8 @@ type Config struct {
 	RequestTimeout time.Duration
 	CORSOrigins    []string
 	ConfigFile     string
+	// RegistryURL Terraform Registry 地址，用于获取各厂商 provider 已发布版本
+	RegistryURL string
 	// Mock 为 true 时所有厂商返回示例数据，便于无凭证联调
 	Mock    bool
 	Vendors Vendors
@@ -59,6 +61,7 @@ type fileServer struct {
 	CacheTTL           string   `yaml:"cache_ttl"`
 	RequestTimeout     string   `yaml:"request_timeout"`
 	CORSAllowedOrigins []string `yaml:"cors_allowed_origins"`
+	RegistryURL        string   `yaml:"registry_url"`
 	Mock               bool     `yaml:"mock"`
 }
 
@@ -115,6 +118,7 @@ func defaults() Config {
 		CacheTTL:       10 * time.Minute,
 		RequestTimeout: 20 * time.Second,
 		CORSOrigins:    []string{"*"},
+		RegistryURL:    "https://registry.terraform.io",
 		Vendors: Vendors{
 			Tencent: VendorConfig{Enabled: true},
 			Aliyun:  VendorConfig{Enabled: true},
@@ -157,6 +161,9 @@ func applyFile(cfg *Config, raw *fileConfig) {
 	if len(raw.Server.CORSAllowedOrigins) > 0 {
 		cfg.CORSOrigins = raw.Server.CORSAllowedOrigins
 	}
+	if raw.Server.RegistryURL != "" {
+		cfg.RegistryURL = raw.Server.RegistryURL
+	}
 	cfg.Mock = raw.Server.Mock
 
 	cfg.Vendors.Tencent = toVendor(raw.Vendors.Tencent)
@@ -195,6 +202,9 @@ func applyEnv(cfg *Config) {
 	}
 	if v := os.Getenv("CORS_ALLOWED_ORIGINS"); v != "" {
 		cfg.CORSOrigins = splitCSV(v)
+	}
+	if v := os.Getenv("REGISTRY_URL"); v != "" {
+		cfg.RegistryURL = v
 	}
 	if v, ok := os.LookupEnv("MOCK"); ok && v != "" {
 		if b, err := strconv.ParseBool(v); err == nil {
