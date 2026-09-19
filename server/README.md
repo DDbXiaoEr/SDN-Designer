@@ -1,5 +1,7 @@
 # OVN-Designer 在线清单服务
 
+[English](./README.en.md) | 中文
+
 Go + Gin 实现的云厂商清单代理：按地域拉取**镜像**与**实例规格**（腾讯云额外返回有货可用区），
 以规范化 JSON 返回给前端，供 `src/store/catalog.js` 通过 `VITE_CATALOG_API_URL` 使用。
 

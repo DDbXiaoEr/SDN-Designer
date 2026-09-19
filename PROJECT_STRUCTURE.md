@@ -25,7 +25,7 @@ OVN-Designer/
 │   ├── internal/provider/     # 腾讯/阿里/AWS/华为实现 + mock + 注册表
 │   ├── internal/tfversion/    # Terraform provider 已发布版本（Registry 拉取 + 缓存 + mock）
 │   ├── config.example.yaml    # 服务配置示例（复制为 config.yaml）
-│   └── README.md              # 接口与运行说明
+│   └── README.md / README.en.md # 接口与运行说明（中英文）
 └── src/
     ├── main.js                # 应用入口：createApp(App).use(i18n).mount('#app')
     ├── App.vue                # 主编排：画布、拖拽、连线校验（含可用区库存提示 toast）、示例加载、保存/导入、导出、创建对话框

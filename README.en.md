@@ -86,7 +86,7 @@ An instance's image and instance type are based on a local built-in list, option
 
 Calling vendor APIs directly from the browser requires AK/SK signing and CORS handling, so a backend proxy that calls the vendor APIs and returns normalized results is recommended.
 
-A Go + Gin proxy is bundled in this repo, see [`server/`](./server/README.md): fill in **read-only** AK/SK in `server/config.yaml` (or use `mock: true` to run without credentials), start it, and point the frontend at it. For Tencent Cloud it also returns per-zone stock in `zones` for instance types.
+A Go + Gin proxy is bundled in this repo, see [`server/`](./server/README.en.md): fill in **read-only** AK/SK in `server/config.yaml` (or use `mock: true` to run without credentials), start it, and point the frontend at it. For Tencent Cloud it also returns per-zone stock in `zones` for instance types.
 
 1. Copy [`.env.example`](./.env.example) to `.env` and set `VITE_CATALOG_API_URL` (variables prefixed with `VITE_` are injected at build time).
 2. The proxy URL supports two modes (see `loadFromApi` in `src/store/catalog.js`):
@@ -103,7 +103,7 @@ The toolbar's "Provider version" field is written as the main provider's `versio
 
 - You can type any Terraform version constraint, or click the arrow to the right of the input to pick from a **published-version dropdown**: the list always shows every version and supports search; picking one generates a `~> major.minor` constraint (e.g. `1.98.2` → `~> 1.98`).
 - The candidates come from the build-time variable `VITE_PROVIDER_VERSIONS_URL` (see [`.env.example`](./.env.example)); it supports a `{vendor}` placeholder for per-vendor requests, or a single response covering all vendors. When unset or failing, manual input is the only option.
-- The data is served by [`server/`](./server/README.md) at `GET /api/providerVersions[/:vendor]`, which pulls from the Terraform Registry (cached) and can be pointed at a private registry.
+- The data is served by [`server/`](./server/README.en.md) at `GET /api/providerVersions[/:vendor]`, which pulls from the Terraform Registry (cached) and can be pointed at a private registry.
 
 ## Project Structure
 
