@@ -241,18 +241,32 @@ ${hclLines(rows)}
   protocol      = "${proto}"
 }`)
       const targets = (rule.backends || [])
-        .map((bid) => ctx.byId.get(bid))
-        .filter((inst) => inst && inst.type === 'Instance')
+        .map((bid) => {
+          // 解析 bid 格式：可能是 "instId" 或 "instId#index"（多实例展开后）
+          const [instId, indexStr] = bid.split('#')
+          const inst = ctx.byId.get(instId)
+          if (!inst || inst.type !== 'Instance') return null
+          const index = indexStr != null ? Number(indexStr) : -1
+          return { inst, index }
+        })
+        .filter(Boolean)
       if (targets.length) {
-        // 多实例节点：每台实例各生成一个 targets 块
+        // 多实例节点且指定了具体实例：只生成一个 targets 块
+        // 多实例节点未指定：每台实例各生成一个 targets 块
         const targetBlocks = targets
-          .flatMap((inst) =>
-            Array.from({ length: instanceCount(inst) }, (_, k) => `  targets {
-    instance_id = ${instanceRef(ctx, inst, k)}.id
+          .flatMap(({ inst, index }) => {
+            const count = instanceCount(inst)
+            const loops = index >= 0 ? 1 : count
+            const startIdx = index >= 0 ? index : 0
+            return Array.from({ length: loops }, (_, k) => {
+              const instIdx = startIdx + k
+              return `  targets {
+    instance_id = ${instanceRef(ctx, inst, instIdx)}.id
     port        = ${port}
     weight      = 10
-  }`)
-          )
+  }`
+            })
+          })
           .join('\n')
         blocks.push(`resource "tencentcloud_clb_attachment" "${ruleName}" {
   clb_id      = ${ref(lb)}.id

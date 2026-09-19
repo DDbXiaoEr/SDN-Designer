@@ -7,7 +7,7 @@ import { Controls } from '@vue-flow/controls'
 import { MiniMap } from '@vue-flow/minimap'
 import { nodeTypes } from './nodes/index.js'
 import { NODE_TYPES, canConnect } from './data/nodeDefinitions.js'
-import { nodeLabelKey } from './data/vendors.js'
+import { nodeLabelKey, retargetCloudNodeData } from './data/vendors.js'
 import { createDemoDesign } from './data/demo.js'
 import { createDesigner, nextId } from './store/designer.js'
 import { exportOvn } from './export/ovn.js'
@@ -16,7 +16,7 @@ import { validateZones, validateInstanceZones, validateGatewaySources, validateL
 import { instanceTypeZones } from './store/catalog.js'
 import { download } from './export/utils.js'
 import { serializeDesign, deserializeDesign, loadFromStorage } from './store/persistence.js'
-import { vendor, providerVersion } from './store/vendor.js'
+import { vendor, setVendor, providerVersion } from './store/vendor.js'
 import Palette from './components/Palette.vue'
 import Toolbar from './components/Toolbar.vue'
 import Inspector from './components/Inspector.vue'
@@ -122,6 +122,19 @@ function onLoadDemo() {
 
 // 首次访问（从未保存过设计）时展示示例；用户清空后的空设计不会再次触发
 if (!loadFromStorage()) applyDemo()
+
+// 切换云厂商：更新展示元数据，并把已有云节点的厂商相关配置迁移到新厂商
+// （当前值在新厂商仍有效则保留，否则回退到新厂商默认值）
+function onVendorChange(next) {
+  if (next === vendor.value) return
+  setVendor(next)
+  for (const node of nodes.value) {
+    const def = NODE_TYPES[node.type]
+    if (!def || def.category !== 'cloud') continue
+    const patch = retargetCloudNodeData(node.type, node.data, next)
+    if (patch) updateNodeData(node.id, patch)
+  }
+}
 
 function onDragOver(e) {
   e.preventDefault()
@@ -377,6 +390,7 @@ const nodesCount = computed(() => nodes.value.length)
       @save-design="saveDesign"
       @import-design="triggerImport"
       @load-demo="onLoadDemo"
+      @change-vendor="onVendorChange"
     />
     <div class="main">
       <Palette />

@@ -1,4 +1,4 @@
-import { createCloudContext, resolveNextHopNode, parsePortRange, resolveVpcRegion, resolveZone, gatewayEips, gatewaySnatSources, vpcSubnets, lbSubnets, lbVpc, instanceLoginAuth, resolveInstanceKeyPair, collectKeyPairs, resolveInterconnects, routeTablesOfVpc, tlsKeyBlocks, hclLines, systemDiskConfig, dataDiskConfigs, clean, instanceRef, instanceCount, isCountedInstance, instancePrivateIp, instanceNameExpr, eipCount, eipRef, eipNameExpr, eipInstanceCandidates, eipBindings } from './common.js'
+import { createCloudContext, resolveNextHopNode, parsePortRange, resolveVpcRegion, resolveZone, gatewayEips, gatewaySnatSources, vpcSubnets, lbSubnets, lbVpc, instanceLoginAuth, resolveInstanceKeyPair, collectKeyPairs, resolveInterconnects, routeTablesOfVpc, tlsKeyBlocks, hclLines, systemDiskConfig, dataDiskConfigs, clean, instanceRef, instanceCount, isCountedInstance, instancePrivateIp, instancePrivateIpAt, instanceNameExpr, eipCount, eipRef, eipNameExpr, eipInstanceCandidates, eipBindings } from './common.js'
 import { parseCidr } from '../utils.js'
 import { translate } from '../../i18n/index.js'
 import { buildOutputs } from './outputs.js'
@@ -243,17 +243,26 @@ ${hclLines(rows)}
   vpc_id          = ${vpc ? `${ref(vpc)}.id` : `"" # ${tt('unassociatedVpc')}`}
 }`)
       ;(rule.backends || []).forEach((bid, bi) => {
-        const inst = ctx.byId.get(bid)
+        // 解析 bid 格式：可能是 "instId" 或 "instId#index"（多实例展开后）
+        const [instId, indexStr] = bid.split('#')
+        const inst = ctx.byId.get(instId)
         if (!inst || inst.type !== 'Instance') return
         const instSub = findSubnet(inst)
         const count = instanceCount(inst)
         const counted = isCountedInstance(inst)
-        // 多实例节点：成员资源自带 count，地址按子网 CIDR 顺序分配
+        const index = indexStr != null ? Number(indexStr) : -1
+        // 多实例节点且指定了具体实例：使用该实例的私网 IP
+        // 多实例节点未指定：成员资源自带 count，地址按子网 CIDR 顺序分配
         const address =
-          (counted ? instancePrivateIp(inst.data, instSub && instSub.data.cidr, 'count.index') : null) ||
+          (index >= 0
+            ? `"${instancePrivateIpAt(inst, instSub && instSub.data.cidr, index)}"`
+            : counted
+              ? instancePrivateIp(inst.data, instSub && instSub.data.cidr, 'count.index')
+              : null) ||
           `"${inst.data.privateIp}"`
+        const memberCount = index >= 0 ? 1 : count
         const mrows = [
-          ...(counted ? [['count', String(count)]] : []),
+          ...(memberCount > 1 ? [['count', String(memberCount)]] : []),
           ['pool_id', `huaweicloud_elb_pool.${poolName}.id`],
           ['address', address],
           ['protocol_port', String(port)],

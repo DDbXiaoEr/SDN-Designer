@@ -100,7 +100,7 @@ export function vpcSubnets(ctx, vpc) {
   return ctx.nodes.filter((n) => n.type === 'Subnet' && ctx.findVpc(n)?.id === vpc.id)
 }
 
-// 负载均衡的后端候选实例：直接连接的实例 + 接入的子网/VPC 内的所有实例
+// 负载均衡的后端候选实例：直接连接的实例 + 接入的子网/VPC 内的所有实例（多实例按序展开）
 export function lbBackendCandidates(ctx, lb) {
   const set = new Map()
   const sources = ctx.sourceNodes(lb.id)
@@ -117,7 +117,22 @@ export function lbBackendCandidates(ctx, lb) {
       if ((sub && subnets.has(sub.id)) || (vpc && vpcs.has(vpc.id))) set.set(inst.id, inst)
     }
   }
-  return [...set.values()]
+  // 展开多实例：每台实例一项，含名称与内网 IP
+  const out = []
+  for (const inst of set.values()) {
+    const sub = ctx.findSubnet(inst)
+    const count = instanceCount(inst)
+    for (let k = 0; k < count; k++) {
+      out.push({
+        id: inst.id,
+        index: k,
+        node: inst,
+        name: count > 1 ? `${clean(inst.data.name)}-${k + 1}` : clean(inst.data.name),
+        ip: instancePrivateIpAt(inst, sub && sub.data.cidr, k),
+      })
+    }
+  }
+  return out
 }
 
 // 负载均衡的部署子网：优先接入的子网，其次接入 VPC 内的子网
@@ -211,20 +226,31 @@ export function eipNameExpr(eip) {
   return instanceNameExpr(eip)
 }
 
-// 展开 EIP 直连实例的可绑定候选：每台实例（多实例按序展开）一项，含名称与内网 IP
+// 展开 EIP 直连目标的可绑定候选：每台实例（多实例按序展开）一项，含名称与内网 IP；负载均衡器也作为候选
 export function eipInstanceCandidates(ctx, eip) {
   const out = []
-  for (const inst of ctx.targetNodes(eip.id)) {
-    if (inst.type !== 'Instance') continue
-    const sub = ctx.findSubnet(inst)
-    const count = instanceCount(inst)
-    for (let k = 0; k < count; k++) {
+  for (const target of ctx.targetNodes(eip.id)) {
+    if (target.type === 'Instance') {
+      const sub = ctx.findSubnet(target)
+      const count = instanceCount(target)
+      for (let k = 0; k < count; k++) {
+        out.push({
+          id: target.id,
+          index: k,
+          node: target,
+          type: 'Instance',
+          name: count > 1 ? `${clean(target.data.name)}-${k + 1}` : clean(target.data.name),
+          ip: instancePrivateIpAt(target, sub && sub.data.cidr, k),
+        })
+      }
+    } else if (target.type === 'LoadBalancer') {
       out.push({
-        id: inst.id,
-        index: k,
-        node: inst,
-        name: count > 1 ? `${clean(inst.data.name)}-${k + 1}` : clean(inst.data.name),
-        ip: instancePrivateIpAt(inst, sub && sub.data.cidr, k),
+        id: target.id,
+        index: 0,
+        node: target,
+        type: 'LoadBalancer',
+        name: clean(target.data.name),
+        ip: '',
       })
     }
   }
@@ -265,15 +291,22 @@ export function eipBindings(eip, candidates) {
   return result
 }
 
-// 实例第 index 台的实际私网 IP（用于展示）：多实例按子网 CIDR 顺序分配，
-// 无法计算时回退到基础私网 IP；单实例直接返回其私网 IP
+// 实例第 index 台的实际私网 IP（用于展示）：
+// 如果 privateIp 包含逗号（多实例手动指定 IP），直接返回对应 index 的 IP
+// 否则按子网 CIDR 顺序分配，无法计算时回退到基础私网 IP；单实例直接返回其私网 IP
 export function instancePrivateIpAt(node, subnetCidr, index = 0) {
-  const ip = clean(node && node.data && node.data.privateIp)
-  if (!ip || instanceCount(node) <= 1) return ip
+  const raw = clean(node && node.data && node.data.privateIp)
+  if (!raw) return ''
+  // 多实例手动指定 IP（逗号分隔）：直接返回对应 index 的 IP
+  if (raw.includes(',')) {
+    const ips = raw.split(',').map((s) => s.trim())
+    return ips[index] || ips[0] || ''
+  }
+  if (instanceCount(node) <= 1) return raw
   const info = parseCidr(subnetCidr)
-  if (!info) return ip
-  const offset = ipToInt(ip) - ipToInt(info.network)
-  if (!(offset > 0)) return ip
+  if (!info) return raw
+  const offset = ipToInt(raw) - ipToInt(info.network)
+  if (!(offset > 0)) return raw
   return intToIp(ipToInt(info.network) + offset + index)
 }
 
@@ -283,6 +316,10 @@ export function instancePrivateIp(data, subnetCidr, indexExpr) {
   const ip = clean(data && data.privateIp)
   if (!indexExpr) return ip ? `"${ip}"` : null
   if (!ip) return null
+  // 逗号分隔多 IP：按 index 直接取对应 IP
+  if (ip.includes(',')) {
+    return `element(split(",", "${ip}"), ${indexExpr})`
+  }
   const info = parseCidr(subnetCidr)
   if (!info) return null
   const offset = ipToInt(ip) - ipToInt(info.network)

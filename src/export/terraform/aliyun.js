@@ -240,15 +240,22 @@ ${hclLines(rows)}
 ${hclLines(lrows)}
 }`)
       ;(rule.backends || []).forEach((bid, bi) => {
-        const inst = ctx.byId.get(bid)
+        // 解析 bid 格式：可能是 "instId" 或 "instId#index"（多实例展开后）
+        const [instId, indexStr] = bid.split('#')
+        const inst = ctx.byId.get(instId)
         if (!inst || inst.type !== 'Instance') return
-        // 多实例节点：为每一台实例各生成一条后端附件
+        // 多实例节点且指定了具体实例：只生成一条后端附件
+        // 多实例节点未指定：为每一台实例各生成一条后端附件
         const count = instanceCount(inst)
-        for (let k = 0; k < count; k++) {
-          const resId = count > 1 ? `${ruleName}_${bi}_${k}` : `${ruleName}_${bi}`
+        const index = indexStr != null ? Number(indexStr) : -1
+        const loops = index >= 0 ? 1 : count
+        const startIdx = index >= 0 ? index : 0
+        for (let k = 0; k < loops; k++) {
+          const instIdx = startIdx + k
+          const resId = loops > 1 ? `${ruleName}_${bi}_${k}` : `${ruleName}_${bi}`
           blocks.push(`resource "alicloud_slb_server_group_server_attachment" "${resId}" {
   server_group_id = alicloud_slb_server_group.${sgName}.id
-  server_id       = ${instanceRef(ctx, inst, k)}.id
+  server_id       = ${instanceRef(ctx, inst, instIdx)}.id
   port            = ${port}
   type            = "ecs"
 }`)

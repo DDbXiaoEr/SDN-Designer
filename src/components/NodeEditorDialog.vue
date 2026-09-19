@@ -81,15 +81,13 @@ const subnetStockIssues = computed(() => {
   ).filter((it) => it.subnetId === node.value.id)
 })
 
-// 负载均衡后端候选：来自直接连接的 ECS 及接入的子网/VPC 内的所有 ECS
+// 负载均衡后端候选：来自直接连接的 ECS 及接入的子网/VPC 内的所有 ECS（多实例按序展开）
 const lbCandidates = computed(() => {
   if (!node.value || node.value.type !== 'LoadBalancer') return []
   const ctx = createCloudContext(nodes.value, edges.value, {})
   return lbBackendCandidates(ctx, node.value).map((inst) => ({
-    value: inst.id,
-    label: inst.data.privateIp
-      ? `${inst.data.name} (${inst.data.privateIp})`
-      : inst.data.name,
+    value: `${inst.id}#${inst.index}`,
+    label: inst.ip ? `${inst.name} (${inst.ip})` : inst.name,
   }))
 })
 
