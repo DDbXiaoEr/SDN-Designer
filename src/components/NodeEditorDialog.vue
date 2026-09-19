@@ -1,5 +1,5 @@
 <script setup>
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { NODE_TYPES } from '../data/nodeDefinitions.js'
 import { diskTypeOptions, defaultDiskType } from '../data/disks.js'
@@ -22,15 +22,30 @@ const { nodes, edges, updateNodeData } = useDesigner()
 const node = computed(() => nodes.value.find((n) => n.id === props.nodeId))
 const def = computed(() => (node.value ? NODE_TYPES[node.value.type] : null))
 
-// 实例是否已连接 KeyPair 节点（Instance -> KeyPair）；连接后登录密钥对由该节点提供
-const hasKeyPairNode = computed(() => {
-  if (!node.value || node.value.type !== 'Instance') return false
-  return edges.value.some((e) => {
-    if (e.source !== node.value.id) return false
-    const target = nodes.value.find((n) => n.id === e.target)
-    return target && target.type === 'KeyPair'
-  })
+// 实例关联的 KeyPair 节点（兼容两种连线方向）；连接后登录密钥对由该节点提供
+const linkedKeyPair = computed(() => {
+  if (!node.value || node.value.type !== 'Instance') return null
+  const id = node.value.id
+  for (const e of edges.value) {
+    const otherId = e.source === id ? e.target : e.target === id ? e.source : null
+    if (!otherId) continue
+    const other = nodes.value.find((n) => n.id === otherId)
+    if (other && other.type === 'KeyPair') return other
+  }
+  return null
 })
+const hasKeyPairNode = computed(() => !!linkedKeyPair.value)
+
+// 已连接密钥对节点时，登录方式固定为密钥登录（写回数据，保持与导出逻辑一致）
+watch(
+  linkedKeyPair,
+  (kp) => {
+    if (kp && node.value && node.value.data.loginType !== 'keyPair') {
+      patch('loginType', 'keyPair')
+    }
+  },
+  { immediate: true }
+)
 
 // 从连线中找指向 nodeId 的指定类型源节点（如 Subnet -> Instance、VPC -> Subnet）
 function sourceNodeOf(nodeId, type) {
@@ -159,9 +174,11 @@ function lbHealthPatch(i, key, value) {
 }
 
 function isFieldVisible(f) {
+  // 已连接密钥对节点时，「登录密钥对」字段始终展示（只读显示节点名称）
+  if (f.key === 'keyPair' && hasKeyPairNode.value) return true
   if (f.when && !f.when(node.value.data)) return false
-  // 已连接 KeyPair 节点时隐藏内联「登录密钥对」字段，避免与节点冲突
-  if (f.key === 'keyPair' && hasKeyPairNode.value) return false
+  // 已连接密钥对节点时禁用密码登录，隐藏密码字段
+  if (f.key === 'password' && hasKeyPairNode.value) return false
   return true
 }
 
@@ -184,6 +201,10 @@ function patch(key, value) {
 
 function optionsFor(f) {
   const opts = typeof f.options === 'function' ? f.options(vendor.value) : f.options || []
+  // 已连接密钥对节点时登录方式只能是密钥登录
+  if (f.key === 'loginType' && hasKeyPairNode.value) {
+    return opts.filter((o) => o.value === 'keyPair')
+  }
   const cur = node.value.data[f.key]
   if (cur != null && cur !== '' && !opts.some((o) => o.value === cur)) {
     return [{ value: cur, label: cur }, ...opts]
@@ -368,11 +389,16 @@ function toggleOutput(key, checked) {
             :value="node.data[f.key]"
             @input="patch(f.key, $event.target.value)"
           />
+          <input
+            v-else-if="f.key === 'keyPair' && hasKeyPairNode"
+            :value="linkedKeyPair.data.name"
+            disabled
+          />
           <input v-else :value="node.data[f.key]" @input="patch(f.key, $event.target.value)" />
         </div>
 
         <p v-if="node.type === 'Instance' && hasKeyPairNode" class="section-hint">
-          {{ t('inspector.keyPairFromNodeHint') }}
+          {{ t('inspector.keyPairFromNodeHint', { name: linkedKeyPair.data.name }) }}
         </p>
 
         <div v-if="instanceZoneCheck" class="section stock">

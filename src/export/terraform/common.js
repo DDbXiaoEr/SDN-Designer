@@ -502,10 +502,12 @@ export function validateLoadBalancers(nodes, edges, vendor) {
   return issues
 }
 
-// 解析实例的密钥对来源：优先取直连的 KeyPair 节点（Instance -> KeyPair），
-// 否则回退到实例内联的 keyPair 字段（兼容旧设计）；密码登录返回 null
+// 解析实例的密钥对来源：优先取直连的 KeyPair 节点（KeyPair -> Instance，
+// 兼容旧设计的 Instance -> KeyPair），否则回退到实例内联的 keyPair 字段；密码登录返回 null
 export function resolveInstanceKeyPair(ctx, inst) {
-  const linked = ctx.targetNodes(inst.id).find((n) => n.type === 'KeyPair')
+  const linked =
+    ctx.sourceNodes(inst.id).find((n) => n.type === 'KeyPair') ||
+    ctx.targetNodes(inst.id).find((n) => n.type === 'KeyPair')
   if (linked) {
     return {
       mode: linked.data.mode === 'existing' ? 'existing' : 'create',

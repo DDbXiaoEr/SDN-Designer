@@ -63,7 +63,7 @@ const DEMOS = {
       { id: 'demo_e_subnet_instance', source: 'demo_subnet', target: 'demo_instance', sourceHandle: 'source-1', targetHandle: 'target-0' },
       { id: 'demo_e_eip_instance', source: 'demo_eip', target: 'demo_instance', sourceHandle: 'source-0', targetHandle: 'target-1' },
       { id: 'demo_e_instance_sg', source: 'demo_instance', target: 'demo_sg', sourceHandle: 'source-1', targetHandle: 'target-0' },
-      { id: 'demo_e_instance_keypair', source: 'demo_instance', target: 'demo_keypair', sourceHandle: 'source-0', targetHandle: 'target-0' },
+      { id: 'demo_e_keypair_instance', source: 'demo_keypair', target: 'demo_instance', sourceHandle: 'source-0', targetHandle: 'target-2' },
     ],
   },
 

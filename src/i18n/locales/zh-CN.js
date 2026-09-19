@@ -250,7 +250,7 @@ export default {
     addDataDisk: '添加数据盘',
     outputsTitle: '导出输出（创建后获取）',
     outputsHint: '这些属性在云上创建后才能确定，勾选后会在导出的 output.tf 中生成对应 output。',
-    keyPairFromNodeHint: '登录密钥对由连接的密钥对节点提供，此处不再单独填写。',
+    keyPairFromNodeHint: '已连接密钥对节点「{name}」，登录方式固定为密钥登录，密钥名即该节点名称。',
     instanceZoneTitle: '可用区库存',
     instanceZoneNoSubnet: '实例未关联子网，无法校验规格可用区库存。',
     instanceZoneUnavailable: '当前子网可用区 {zone} 不提供规格 {type}，该规格仅在 {zones} 有货。',

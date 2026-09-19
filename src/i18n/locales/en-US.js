@@ -250,7 +250,7 @@ export default {
     addDataDisk: 'Add Data Disk',
     outputsTitle: 'Export Outputs (Known After Creation)',
     outputsHint: 'These values are only known after resources are created. Selecting them adds matching outputs to the exported output.tf.',
-    keyPairFromNodeHint: 'The login key pair is provided by the connected Key Pair node.',
+    keyPairFromNodeHint: 'Connected to key pair node "{name}"; login is fixed to key pair and the key name is that node name.',
     lbRulesTitle: 'Listeners',
     lbAddRule: 'Add listener',
     lbPortPlaceholder: 'Listener port',

@@ -225,10 +225,12 @@ OVN-Designer/
   选项来自 `data/outputs.js`（按厂商映射只读属性名），在 `NodeEditorDialog` 的「导出输出」分区勾选。
   导出时 `export/terraform/outputs.js` 的 `buildOutputs` 生成 `output` 块，多文件导出中追加 `output.tf`；
   无任何勾选则不生成该文件。
-- `KeyPair` 节点表示登录密钥对：`Instance → KeyPair` 连线表示绑定；`mode='create'` 由 Terraform 新建
+- `KeyPair` 节点表示登录密钥对：连线规则为 `KeyPair → Instance`（表示绑定；`common.js` 与编辑器同时兼容
+  旧设计的 `Instance → KeyPair` 方向）；`mode='create'` 由 Terraform 新建
   （`*_key_pair` 资源，腾讯云/AWS/华为云附带 `tls_private_key` 与 `.pem` 私钥文件，阿里云用 `key_file`），
   `mode='existing'` 关联云上已有密钥对（阿里云/AWS/华为云按名称引用；腾讯云因实例用 `key_ids`，生成
-  `data "tencentcloud_key_pairs"` 按名称查询 ID）。实例已连接 KeyPair 节点时，编辑器隐藏内联「登录密钥对」字段，
+  `data "tencentcloud_key_pairs"` 按名称查询 ID）。实例已连接 KeyPair 节点时，编辑器强制登录方式为「密钥登录」
+  （隐藏密码字段），内联「登录密钥对」字段只读显示该 KeyPair 节点名称（密钥名即节点名），
   导出优先使用节点；未连线时回退到内联 `keyPair`（兼容旧设计），密码登录不受影响。
 - 节点属性编辑在 `NodeEditorDialog` 弹窗中完成：双击节点或点击右侧面板的「编辑」打开；
   `Inspector` 仅显示只读摘要与编辑/删除按钮。
