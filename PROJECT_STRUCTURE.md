@@ -23,6 +23,7 @@ OVN-Designer/
 │   ├── internal/config/       # 配置：YAML 文件（环境变量可覆盖，密钥全部可配置）
 │   ├── internal/catalog/      # Item/Provider 抽象、TTL 缓存、HTTP 接口
 │   ├── internal/provider/     # 腾讯/阿里/AWS/华为实现 + mock + 注册表
+│   ├── internal/tfversion/    # Terraform provider 已发布版本（Registry 拉取 + 缓存 + mock）
 │   ├── config.example.yaml    # 服务配置示例（复制为 config.yaml）
 │   └── README.md              # 接口与运行说明
 └── src/
@@ -32,7 +33,7 @@ OVN-Designer/
     │   └── main.css           # 全局 CSS 变量（主题色）与基础样式
     ├── data/
     │   ├── nodeDefinitions.js # 节点类型元数据（唯一数据源）
-    │   ├── vendors.js         # 云厂商列表 + 资源名/徽标按厂商解析 + provider 默认版本
+    │   ├── vendors.js         # 云厂商列表 + 资源名/徽标按厂商解析 + provider 默认版本 + 切换厂商的节点配置迁移
     │   ├── regions.js         # 各云厂商地域列表与默认地域
     │   ├── chargeTypes.js     # 各云厂商实例计费方式（包年包月/按量付费/抢占式）
     │   ├── disks.js           # 各云厂商云盘类型（系统盘/数据盘）
@@ -43,6 +44,7 @@ OVN-Designer/
     ├── store/
     │   ├── designer.js        # 状态管理（provide/inject 封装 useVueFlow）
     │   ├── catalog.js         # 镜像/实例规格清单：本地内置 + 在线 JSON/厂商 API 合并
+    │   ├── providerVersions.js # Terraform provider 已发布版本（来自 server /api/providerVersions）
     │   ├── persistence.js     # 设计序列化/反序列化 + localStorage 自动保存
     │   └── vendor.js          # 当前云厂商 + 各厂商 provider 版本（ref，持久化到 localStorage）
     ├── nodes/
@@ -52,6 +54,7 @@ OVN-Designer/
     ├── components/
     │   ├── Palette.vue        # 左侧节点库（可拖拽）
     │   ├── Toolbar.vue        # 顶部工具栏（厂商/Provider 版本/语言/加载示例/清空/保存/导入/导出）
+    │   ├── ProviderVersionSelect.vue # Provider 版本输入 + 已发布版本下拉（搜索，选择生成 ~> 主.次）
     │   ├── Inspector.vue      # 右侧属性面板（只读摘要 + 编辑/删除按钮）
     │   ├── NodeEditorDialog.vue # 节点编辑弹窗（字段编辑 + 网卡/规则/路由/磁盘/输出分区）
 │   ├── CreateHostDialog.vue # 创建宿主机对话框（填写网卡信息）
@@ -131,8 +134,19 @@ OVN-Designer/
 - 工具栏「Provider 版本」输入框对应当前厂商，写入 `provider.tf` 中主 provider 的 `version` 约束
   （如 `~> 5.0` / `>= 1.200.0`）；各厂商版本独立保存于 `store/vendor.js` 的 `providerVersions`，
   留空时回退到 `vendors.js` 的 `DEFAULT_PROVIDER_VERSIONS`。`tls` / `local` 等辅助 provider 版本固定不变。
+  输入框右侧箭头打开自定义下拉 `components/ProviderVersionSelect.vue`（不用原生 `datalist`：
+  原生候选会按输入文本过滤，约束值如 `~> 1.60` 几乎匹配不到任何版本）。下拉始终列出全部已发布版本
+  并支持搜索，选中后生成 `~> 主.次` 约束（如 `1.98.2` → `~> 1.98`），也可手动输入任意约束。
+  候选来源为 `store/providerVersions.js`（构建时环境变量 `VITE_PROVIDER_VERSIONS_URL`，
+  支持 `{vendor}` 占位符，缺省/失败时仅手输）：server 的 `GET /api/providerVersions[/:vendor]`
+  从 Terraform Registry 拉取并按 `cache_ttl` 缓存，`mock: true` 时返回内置示例版本；
+  `server.registry_url` 可指向私有 Registry。
 - 云资源节点的展示名与徽标按厂商变化（`vendors.js` 的 `nodeLabelKey` / `nodeBadge`）：
   i18n 中 `nodes.vpc` / `nodes.subnet` / `nodes.instance` 等为按厂商分组的对象。
+- 切换云厂商时（`Toolbar` 触发 `change-vendor`，`App.vue` 的 `onVendorChange`），除标签/徽标变化外，
+  还会用 `vendors.js` 的 `retargetCloudNodeData(type, data, vendor)` 迁移画布上已有云节点的厂商相关配置：
+  当前值在新厂商候选中仍有效（如地域/可用区/镜像/规格/计费方式/云盘类型）则保留，否则替换为新厂商默认值
+  （`VPC.region`、`Subnet.zone`、`Instance.imageId`/`instanceType`/`chargeType`/`systemDisk`/`dataDisks`）。
 - Terraform 导出按厂商分发（`export/terraform/index.js`）；OVN 导出与厂商无关。
 - VPC 的「地域」按当前厂商从 `regions.js` 下拉选择；Terraform 导出的 provider 默认地域取自首个 VPC 的 `region`。
 - Instance 的「计费方式」按当前厂商从 `chargeTypes.js` 下拉选择（包年包月/按量付费/抢占式）；

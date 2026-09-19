@@ -44,7 +44,12 @@ export default {
     loadDemo: 'Load demo',
     loadDemoConfirm: 'Loading the demo will replace the current canvas. Continue?',
     providerVersion: 'Provider version',
-    providerVersionHint: 'Provider version constraint written to provider.tf, e.g. ~> 5.0 or >= 1.200.0',
+    providerVersionHint:
+      'Provider version constraint written to provider.tf, e.g. ~> 5.0 or >= 1.200.0; type it manually or pick a published version from the dropdown (generates ~> major.minor)',
+    providerVersionSelect: 'Pick a published version',
+    providerVersionSearch: 'Search versions',
+    providerVersionEmpty: 'No matching versions',
+    providerVersionUnavailable: 'No published versions (online source not configured)',
   },
   palette: {
     title: 'Node Library',

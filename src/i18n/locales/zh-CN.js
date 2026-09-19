@@ -44,7 +44,12 @@ export default {
     loadDemo: '加载示例',
     loadDemoConfirm: '加载示例将覆盖当前画布，确定继续？',
     providerVersion: 'Provider 版本',
-    providerVersionHint: '写入 provider.tf 的 provider 版本约束，如 ~> 5.0 或 >= 1.200.0',
+    providerVersionHint:
+      '写入 provider.tf 的 provider 版本约束，如 ~> 5.0 或 >= 1.200.0；可手动输入，也可从下拉选择已发布版本（自动生成 ~> 主.次）',
+    providerVersionSelect: '选择已发布版本',
+    providerVersionSearch: '搜索版本',
+    providerVersionEmpty: '无匹配版本',
+    providerVersionUnavailable: '暂无已发布版本（未配置在线来源）',
   },
   palette: {
     title: '节点库',
