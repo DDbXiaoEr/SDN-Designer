@@ -153,6 +153,21 @@ export function lbVpc(ctx, lb) {
   return sub ? ctx.findVpc(sub) : null
 }
 
+// 展开监听规则的后端为具体实例（多实例按序展开；指定 #index 时只取该台）
+export function lbBackendInstances(ctx, rule) {
+  const out = []
+  for (const bid of rule.backends || []) {
+    const [instId, indexStr] = String(bid).split('#')
+    const inst = ctx.byId.get(instId)
+    if (!inst || inst.type !== 'Instance') continue
+    const count = instanceCount(inst)
+    const index = indexStr != null ? Number(indexStr) : -1
+    if (index >= 0) out.push({ node: inst, index })
+    else for (let k = 0; k < count; k++) out.push({ node: inst, index: k })
+  }
+  return out
+}
+
 // 各厂商 HTTP 健康检查支持的「请求方法」（Terraform 资源无请求体字段，见 validateLoadBalancers）
 const LB_HEALTH_METHOD_SUPPORT = {
   aliyun: ['GET', 'HEAD'],
@@ -161,6 +176,35 @@ const LB_HEALTH_METHOD_SUPPORT = {
   // AWS 目标组不暴露请求方法；GET 为其隐含默认，保持不告警
   aws: ['GET'],
 }
+
+// 阿里云四类负载均衡：监听协议支持与最少可用区数（校验用）
+const ALIYUN_LB_PROTOCOLS = {
+  clb: ['tcp', 'udp', 'http', 'https'],
+  alb: ['http', 'https', 'quic'],
+  nlb: ['tcp', 'udp', 'tcpssl'],
+  gwlb: ['geneve'],
+}
+const ALIYUN_LB_MIN_ZONES = { clb: 0, alb: 2, nlb: 2, gwlb: 1 }
+
+// 腾讯云负载均衡：类型与监听协议（ALB 暂无 Terraform 资源，仅校验并告警）
+const TENCENT_LB_TYPES = ['clb', 'alb', 'gwlb']
+const TENCENT_LB_PROTOCOLS = {
+  clb: ['tcp', 'udp', 'http', 'https'],
+  alb: ['http', 'https'],
+  gwlb: ['geneve'],
+}
+
+const LB_PROTOCOLS_BY_VENDOR = {
+  aliyun: ALIYUN_LB_PROTOCOLS,
+  tencent: TENCENT_LB_PROTOCOLS,
+}
+
+// 健康检查请求方法支持：阿里云 ALB 额外支持 POST，其余按厂商默认
+function lbHealthMethods(vendor, lbType) {
+  if (vendor === 'aliyun' && lbType === 'alb') return ['GET', 'HEAD', 'POST']
+  return LB_HEALTH_METHOD_SUPPORT[vendor] || []
+}
+
 
 // 监听规则的健康检查配置：归一化并回退默认值（兼容缺少 healthCheck 的旧设计）
 export function lbHealthCheck(rule) {
@@ -471,9 +515,49 @@ export function validateLoadBalancers(nodes, edges, vendor) {
   const ctx = createCloudContext(nodes, edges, {})
   const issues = []
   for (const lb of nodes.filter((n) => n.type === 'LoadBalancer')) {
+    const rawType = (lb.data.lbConfig && String(lb.data.lbConfig.type || '').toLowerCase()) || 'clb'
+    const vendorTypes =
+      vendor === 'aliyun'
+        ? Object.keys(ALIYUN_LB_PROTOCOLS)
+        : vendor === 'tencent'
+          ? TENCENT_LB_TYPES
+          : []
+    const lbType = vendorTypes.includes(rawType) ? rawType : 'clb'
+    const protos = (LB_PROTOCOLS_BY_VENDOR[vendor] || {})[lbType] || null
     const hasNet = ctx.sourceNodes(lb.id).some((n) => n.type === 'Subnet' || n.type === 'VPC')
     if (!hasNet) {
       issues.push({ key: 'export.lbNoNetwork', params: { name: clean(lb.data.name) } })
+    }
+    // 阿里云按类型校验可用区数量与监听协议（其他厂商保持单一类型行为）
+    if (vendor === 'aliyun') {
+      const zones = new Set(
+        lbSubnets(ctx, lb)
+          .map((s) => {
+            const vpc = ctx.findVpc(s)
+            return resolveZone(s.data.zone, (vpc && vpc.data.region) || '', 'aliyun')
+          })
+          .filter(Boolean)
+      )
+      const minZones = ALIYUN_LB_MIN_ZONES[lbType] || 0
+      if (minZones > 1 && zones.size < minZones) {
+        issues.push({
+          key: 'export.lbZonesInsufficient',
+          params: { name: clean(lb.data.name), type: lbType.toUpperCase(), count: minZones, actual: zones.size },
+        })
+      } else if (lbType !== 'clb' && hasNet && zones.size === 0) {
+        issues.push({
+          key: 'export.lbNoZone',
+          params: { name: clean(lb.data.name), type: lbType.toUpperCase() },
+        })
+      }
+      // GWLB 需要较新的 provider（>= 1.234）
+      if (lbType === 'gwlb') {
+        issues.push({ key: 'export.lbGwlbProviderVersion', params: { name: clean(lb.data.name) } })
+      }
+    }
+    // 腾讯云 ALB 暂无 Terraform 资源，导出时跳过
+    if (vendor === 'tencent' && lbType === 'alb') {
+      issues.push({ key: 'export.lbAlbUnsupported', params: { name: clean(lb.data.name) } })
     }
     for (const rule of lb.data.rules || []) {
       if (!(rule.backends || []).length) {
@@ -481,6 +565,15 @@ export function validateLoadBalancers(nodes, edges, vendor) {
           key: 'export.lbNoBackend',
           params: { name: clean(lb.data.name), port: clean(rule.port) },
         })
+      }
+      if (protos) {
+        const proto = String(rule.protocol || '').toLowerCase()
+        if (proto && !protos.includes(proto)) {
+          issues.push({
+            key: 'export.lbProtocolInvalid',
+            params: { name: clean(lb.data.name), protocol: proto.toUpperCase(), type: lbType.toUpperCase() },
+          })
+        }
       }
       // HTTP(S) 健康检查的请求方法/请求体：请求体各厂商均无对应字段，方法超出厂商支持范围时提示
       const hc = lbHealthCheck(rule)
@@ -491,7 +584,7 @@ export function validateLoadBalancers(nodes, edges, vendor) {
           params: { name: clean(lb.data.name), port: clean(rule.port) },
         })
       }
-      if (!(LB_HEALTH_METHOD_SUPPORT[vendor] || []).includes(hc.method)) {
+      if (!lbHealthMethods(vendor, lbType).includes(hc.method)) {
         issues.push({
           key: 'export.lbHealthMethodUnsupported',
           params: { name: clean(lb.data.name), port: clean(rule.port), method: hc.method },

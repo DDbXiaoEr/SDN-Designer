@@ -58,7 +58,12 @@ const CLOUD_BADGES = {
   LoadBalancer: { aliyun: 'SLB', tencent: 'CLB', aws: 'ALB', huawei: 'ELB' },
 }
 
-export function nodeBadge(type, vendor) {
+export function nodeBadge(type, vendor, data) {
+  // 阿里云/腾讯云负载均衡按所选类型展示徽标（CLB/ALB/NLB/GWLB）
+  if (type === 'LoadBalancer' && ['aliyun', 'tencent'].includes(vendor) && data && data.lbConfig) {
+    const lbType = String(data.lbConfig.type || '').toLowerCase()
+    if (['clb', 'alb', 'nlb', 'gwlb'].includes(lbType)) return lbType.toUpperCase()
+  }
   if (CLOUD_BADGES[type]) {
     return CLOUD_BADGES[type][vendor] || CLOUD_BADGES[type][DEFAULT_VENDOR]
   }

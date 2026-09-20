@@ -1,4 +1,4 @@
-import { createCloudContext, resolveNextHopNode, resolveVpcRegion, resolveZone, gatewayEips, gatewaySnatSources, lbSubnets, lbHealthCheck, instanceLoginAuth, resolveInstanceKeyPair, collectKeyPairs, resolveInterconnects, routeTablesOfVpc, hclLines, systemDiskConfig, dataDiskConfigs, clean, instanceRef, instanceCount, isCountedInstance, instancePrivateIp, instanceNameExpr, eipCount, eipRef, eipNameExpr, eipInstanceCandidates, eipBindings } from './common.js'
+import { createCloudContext, resolveNextHopNode, resolveVpcRegion, resolveZone, gatewayEips, gatewaySnatSources, lbSubnets, lbVpc, lbHealthCheck, lbBackendInstances, instanceLoginAuth, resolveInstanceKeyPair, collectKeyPairs, resolveInterconnects, routeTablesOfVpc, hclLines, systemDiskConfig, dataDiskConfigs, clean, instanceRef, instanceCount, isCountedInstance, instancePrivateIp, instancePrivateIpAt, instanceNameExpr, eipCount, eipRef, eipNameExpr, eipInstanceCandidates, eipBindings } from './common.js'
 import { translate } from '../../i18n/index.js'
 import { buildOutputs } from './outputs.js'
 
@@ -70,6 +70,386 @@ function aliyunChargeRows(chargeType) {
   }
   return [['instance_charge_type', '"PostPaid"']]
 }
+
+// 阿里云四类负载均衡支持的监听协议：clb 传统型 / alb 应用型 / nlb 网络型 / gwlb 网关型
+export const ALIYUN_LB_PROTOCOLS = {
+  clb: ['tcp', 'udp', 'http', 'https'],
+  alb: ['http', 'https', 'quic'],
+  nlb: ['tcp', 'udp', 'tcpssl'],
+  gwlb: ['geneve'],
+}
+
+// NLB 服务器组协议：TCPSSL 监听器后端仍按 TCP 转发
+const NLB_SERVER_PROTOCOL = { tcp: 'TCP', udp: 'UDP', tcpssl: 'TCP' }
+
+// 归一化阿里云负载均衡配置（兼容旧设计：缺少 lbConfig 时按传统型 CLB 处理）
+export function aliyunLbConfig(lb) {
+  const c = (lb.data && lb.data.lbConfig) || {}
+  const type = ALIYUN_LB_PROTOCOLS[String(c.type || '').toLowerCase()]
+    ? String(c.type).toLowerCase()
+    : 'clb'
+  const defaults = {
+    clb: { scheduler: 'wrr', ipVersion: '' },
+    alb: { scheduler: 'Wrr', ipVersion: 'IPv4' },
+    nlb: { scheduler: 'Wrr', ipVersion: 'ipv4' },
+    gwlb: { scheduler: '5TCH', ipVersion: 'Ipv4' },
+  }[type]
+  return {
+    type,
+    spec: clean(c.spec) || 'slb.s2.small',
+    internetChargeType: c.internetChargeType === 'paybybandwidth' ? 'PayByBandwidth' : 'PayByTraffic',
+    bandwidth: Number(c.bandwidth) > 0 ? Math.floor(Number(c.bandwidth)) : 10,
+    edition: c.edition === 'Standard' ? 'Standard' : 'Basic',
+    addressAllocatedMode: c.addressAllocatedMode === 'Fixed' ? 'Fixed' : 'Dynamic',
+    ipVersion: clean(c.ipVersion) || defaults.ipVersion,
+    scheduler: clean(c.scheduler) || defaults.scheduler,
+    stickySession: !!c.stickySession,
+    connectionDrain: !!c.connectionDrain,
+    crossZone: c.crossZone !== false,
+    preserveClientIp: !!c.preserveClientIp,
+    proxyProtocol: !!c.proxyProtocol,
+    serverFailoverMode: c.serverFailoverMode === 'Rebalance' ? 'Rebalance' : 'NoRebalance',
+  }
+}
+
+// 由接入的子网推导负载均衡的可用区映射（vswitch_id + zone_id）；zone 去重
+function aliyunLbZoneMappings(ctx, lb, region) {
+  const out = []
+  const seen = new Set()
+  for (const sub of lbSubnets(ctx, lb)) {
+    const vpc = ctx.findVpc(sub)
+    const zone = resolveZone(sub.data.zone, (vpc && vpc.data.region) || region, 'aliyun')
+    if (!zone || seen.has(zone)) continue
+    seen.add(zone)
+    out.push({ vswId: `${ctx.ref(sub)}.id`, zone })
+  }
+  return out
+}
+
+// HCL 内联子块（如 zone_mappings / health_check_config / servers）格式化
+function nestedBlock(keyword, rows, indent) {
+  const pad = ' '.repeat(indent)
+  const inner = ' '.repeat(indent + 2)
+  const width = rows.reduce((m, [k]) => Math.max(m, k.length), 0)
+  const body = rows.map(([k, v]) => `${inner}${k.padEnd(width)} = ${v}`).join('\n')
+  return `${pad}${keyword} {\n${body}\n${pad}}`
+}
+
+function resourceBlock(type, name, body) {
+  return `resource "${type}" "${name}" {\n${body}\n}`
+}
+
+// 后端服务器属性（ALB/NLB/GWLB 共用）；GWLB 无 weight 字段
+function serverRows(ctx, inst, index, port, withWeight) {
+  const sub = ctx.findSubnet(inst)
+  const ip = instancePrivateIpAt(inst, sub && sub.data.cidr, index)
+  const rows = [['server_id', `${instanceRef(ctx, inst, index)}.id`]]
+  if (ip) rows.push(['server_ip', `"${ip}"`])
+  rows.push(['server_type', '"Ecs"'], ['port', String(port)])
+  if (withWeight) rows.push(['weight', '100'])
+  return rows
+}
+
+function albHealthRows(hc) {
+  const proto = hc.protocol === 'https' ? 'HTTPS' : hc.protocol === 'tcp' ? 'TCP' : 'HTTP'
+  const rows = [
+    ['health_check_enabled', hc.enabled ? 'true' : 'false'],
+    ['health_check_protocol', `"${proto}"`],
+    ['health_check_interval', String(hc.interval)],
+    ['health_check_timeout', String(hc.timeout)],
+    ['healthy_threshold', String(hc.healthyThreshold)],
+    ['unhealthy_threshold', String(hc.unhealthyThreshold)],
+  ]
+  if (/^\d+$/.test(hc.port)) rows.push(['health_check_connect_port', hc.port])
+  if (hc.enabled && hc.protocol !== 'tcp') {
+    rows.push(['health_check_path', `"${hc.path}"`], ['health_check_method', `"${hc.method}"`])
+  }
+  return rows
+}
+
+function nlbHealthRows(hc) {
+  const http = hc.protocol !== 'tcp'
+  const rows = [
+    ['health_check_enabled', hc.enabled ? 'true' : 'false'],
+    ['health_check_type', `"${http ? 'HTTP' : 'TCP'}"`],
+    ['health_check_interval', String(hc.interval)],
+    ['health_check_connect_timeout', String(hc.timeout)],
+    ['healthy_threshold', String(hc.healthyThreshold)],
+    ['unhealthy_threshold', String(hc.unhealthyThreshold)],
+  ]
+  if (/^\d+$/.test(hc.port)) rows.push(['health_check_connect_port', hc.port])
+  if (http) {
+    rows.push(['health_check_url', `"${hc.path}"`])
+    rows.push(['http_check_method', `"${['GET', 'HEAD'].includes(hc.method) ? hc.method : 'GET'}"`])
+  }
+  return rows
+}
+
+function gwlbHealthRows(hc) {
+  const http = hc.protocol !== 'tcp'
+  const rows = [
+    ['health_check_enabled', hc.enabled ? 'true' : 'false'],
+    ['health_check_protocol', `"${http ? 'HTTP' : 'TCP'}"`],
+    ['health_check_interval', String(hc.interval)],
+    ['health_check_connect_timeout', String(hc.timeout)],
+    ['healthy_threshold', String(hc.healthyThreshold)],
+    ['unhealthy_threshold', String(hc.unhealthyThreshold)],
+  ]
+  if (/^\d+$/.test(hc.port)) rows.push(['health_check_connect_port', hc.port])
+  if (http) rows.push(['health_check_path', `"${hc.path}"`])
+  return rows
+}
+
+// 传统型 CLB：SLB 实例 + 服务器组 + 监听器 + 后端附件
+function exportAliyunClb(ctx, lb, cfg, blocks) {
+  const { ref } = ctx
+  const name = ctx.name(lb)
+  const sub = lbSubnets(ctx, lb)[0]
+  const rows = [
+    ['load_balancer_name', `"${clean(lb.data.name)}"`],
+    ['address_type', lb.data.internal ? '"intranet"' : '"internet"'],
+    ['load_balancer_spec', `"${cfg.spec}"`],
+    ['internet_charge_type', `"${cfg.internetChargeType}"`],
+  ]
+  if (cfg.internetChargeType === 'PayByBandwidth') rows.push(['bandwidth', String(cfg.bandwidth)])
+  if (sub) rows.push(['vswitch_id', `${ref(sub)}.id`])
+  blocks.push(resourceBlock('alicloud_slb_load_balancer', name, hclLines(rows)))
+  ;(lb.data.rules || []).forEach((rule, ri) => {
+    const ruleName = `${name}_${ri}`
+    const sgName = `${ruleName}_sg`
+    const port = Number(rule.port) || 80
+    const proto = String(rule.protocol || 'tcp').toLowerCase()
+    blocks.push(`resource "alicloud_slb_server_group" "${sgName}" {
+  load_balancer_id = ${ref(lb)}.id
+  name             = "${clean(lb.data.name)}-${ri}"
+}`)
+    const lrows = [
+      ['load_balancer_id', `${ref(lb)}.id`],
+      ['frontend_port', String(port)],
+      ['backend_port', String(port)],
+      ['protocol', `"${proto}"`],
+      ['server_group_id', `alicloud_slb_server_group.${sgName}.id`],
+    ]
+    if (['wrr', 'rr', 'wlc', 'sch'].includes(cfg.scheduler)) lrows.push(['scheduler', `"${cfg.scheduler}"`])
+    // HTTPS 监听器的 bandwidth 为必填
+    if (proto === 'https') lrows.push(['bandwidth', '10'])
+    // 健康检查：协议 http(s) 用 http 检查并带路径，tcp 用 tcp 检查
+    const hc = lbHealthCheck(rule)
+    if (hc.enabled) {
+      const hcHttp = hc.protocol !== 'tcp'
+      lrows.push(['health_check', '"on"'])
+      lrows.push(['health_check_type', hcHttp ? '"http"' : '"tcp"'])
+      if (hcHttp) lrows.push(['health_check_uri', `"${hc.path}"`])
+      // 阿里云 SLB 的 HTTP 健康检查请求方法仅支持 head/get
+      if (hcHttp && ['GET', 'HEAD'].includes(hc.method)) {
+        lrows.push(['health_check_method', `"${hc.method.toLowerCase()}"`])
+      }
+      if (/^\d+$/.test(hc.port)) lrows.push(['health_check_connect_port', hc.port])
+      lrows.push(['healthy_threshold', String(hc.healthyThreshold)])
+      lrows.push(['unhealthy_threshold', String(hc.unhealthyThreshold)])
+      lrows.push(['health_check_timeout', String(hc.timeout)])
+      lrows.push(['health_check_interval', String(hc.interval)])
+    } else {
+      lrows.push(['health_check', '"off"'])
+    }
+    blocks.push(resourceBlock('alicloud_slb_listener', ruleName, hclLines(lrows)))
+    ;(rule.backends || []).forEach((bid, bi) => {
+      // 解析 bid 格式：可能是 "instId" 或 "instId#index"（多实例展开后）
+      const [instId, indexStr] = bid.split('#')
+      const inst = ctx.byId.get(instId)
+      if (!inst || inst.type !== 'Instance') return
+      // 多实例节点且指定了具体实例：只生成一条后端附件
+      // 多实例节点未指定：为每一台实例各生成一条后端附件
+      const count = instanceCount(inst)
+      const index = indexStr != null ? Number(indexStr) : -1
+      const loops = index >= 0 ? 1 : count
+      const startIdx = index >= 0 ? index : 0
+      for (let k = 0; k < loops; k++) {
+        const instIdx = startIdx + k
+        const resId = loops > 1 ? `${ruleName}_${bi}_${k}` : `${ruleName}_${bi}`
+        blocks.push(`resource "alicloud_slb_server_group_server_attachment" "${resId}" {
+  server_group_id = alicloud_slb_server_group.${sgName}.id
+  server_id       = ${instanceRef(ctx, inst, instIdx)}.id
+  port            = ${port}
+  type            = "ecs"
+}`)
+      }
+    })
+  })
+}
+
+// 应用型 ALB：LB 实例 + 服务器组（内联后端）+ 监听器（默认动作转发到服务器组）
+function exportAliyunAlb(ctx, lb, cfg, region, blocks) {
+  const { ref } = ctx
+  const name = ctx.name(lb)
+  const lbRef = `alicloud_alb_load_balancer.${name}.id`
+  const vpc = lbVpc(ctx, lb)
+  const rows = [
+    ['load_balancer_name', `"${clean(lb.data.name)}"`],
+    ['address_type', lb.data.internal ? '"Intranet"' : '"Internet"'],
+    ['address_allocated_mode', `"${cfg.addressAllocatedMode}"`],
+    ['address_ip_version', `"${cfg.ipVersion}"`],
+    ['load_balancer_edition', `"${cfg.edition}"`],
+  ]
+  if (vpc) rows.push(['vpc_id', `${ref(vpc)}.id`])
+  const zones = aliyunLbZoneMappings(ctx, lb, region)
+    .map((m) => nestedBlock('zone_mappings', [['vswitch_id', m.vswId], ['zone_id', `"${m.zone}"`]], 2))
+    .join('\n')
+  const billing = nestedBlock('load_balancer_billing_config', [['pay_type', '"PayAsYouGo"']], 2)
+  blocks.push(resourceBlock('alicloud_alb_load_balancer', name, [hclLines(rows), billing, zones].filter(Boolean).join('\n')))
+
+  ;(lb.data.rules || []).forEach((rule, ri) => {
+    const proto = String(rule.protocol || 'http').toLowerCase()
+    if (!ALIYUN_LB_PROTOCOLS.alb.includes(proto)) return
+    const ruleName = `${name}_${ri}`
+    const sgName = `${ruleName}_sg`
+    const port = Number(rule.port) || (proto === 'https' ? 443 : 80)
+    const hc = lbHealthCheck(rule)
+    const sgBody = [
+      hclLines([
+        ['vpc_id', vpc ? `${ref(vpc)}.id` : '""'],
+        ['server_group_name', `"${clean(lb.data.name)}-${ri}"`],
+        ['protocol', '"HTTP"'],
+        ['scheduler', `"${cfg.scheduler}"`],
+      ]),
+      nestedBlock('health_check_config', albHealthRows(hc), 2),
+    ]
+    if (cfg.stickySession) {
+      sgBody.push(nestedBlock('sticky_session_config', [['sticky_session_enabled', 'true'], ['sticky_session_type', '"Insert"']], 2))
+    }
+    if (cfg.connectionDrain) {
+      sgBody.push(nestedBlock('connection_drain_config', [['connection_drain_enabled', 'true']], 2))
+    }
+    for (const { node, index } of lbBackendInstances(ctx, rule)) {
+      sgBody.push(nestedBlock('servers', serverRows(ctx, node, index, port, true), 2))
+    }
+    blocks.push(resourceBlock('alicloud_alb_server_group', sgName, sgBody.join('\n')))
+    const listenerBody = [
+      `  load_balancer_id  = ${lbRef}`,
+      `  listener_protocol = "${proto.toUpperCase()}"`,
+      `  listener_port     = ${port}`,
+      '  default_actions {',
+      '    type = "ForwardGroup"',
+      '    forward_group_config {',
+      '      server_group_tuples {',
+      `        server_group_id = alicloud_alb_server_group.${sgName}.id`,
+      '      }',
+      '    }',
+      '  }',
+    ].join('\n')
+    blocks.push(resourceBlock('alicloud_alb_listener', ruleName, listenerBody))
+  })
+}
+
+// 网络型 NLB：LB 实例 + 服务器组 + 监听器 + 后端附件
+function exportAliyunNlb(ctx, lb, cfg, region, blocks) {
+  const { ref } = ctx
+  const name = ctx.name(lb)
+  const lbRef = `alicloud_nlb_load_balancer.${name}.id`
+  const vpc = lbVpc(ctx, lb)
+  const vpcRef = vpc ? `${ref(vpc)}.id` : '""'
+  const rows = [
+    ['load_balancer_name', `"${clean(lb.data.name)}"`],
+    ['load_balancer_type', '"Network"'],
+    ['address_type', lb.data.internal ? '"Intranet"' : '"Internet"'],
+    ['address_ip_version', `"${cfg.ipVersion}"`],
+    ['cross_zone_enabled', cfg.crossZone ? 'true' : 'false'],
+  ]
+  if (vpc) rows.push(['vpc_id', vpcRef])
+  const zones = aliyunLbZoneMappings(ctx, lb, region)
+    .map((m) => nestedBlock('zone_mappings', [['vswitch_id', m.vswId], ['zone_id', `"${m.zone}"`]], 2))
+    .join('\n')
+  blocks.push(resourceBlock('alicloud_nlb_load_balancer', name, [hclLines(rows), zones].filter(Boolean).join('\n')))
+
+  ;(lb.data.rules || []).forEach((rule, ri) => {
+    const proto = String(rule.protocol || 'tcp').toLowerCase()
+    if (!ALIYUN_LB_PROTOCOLS.nlb.includes(proto)) return
+    const protoUp = proto.toUpperCase()
+    const port = Number(rule.port) || 80
+    const ruleName = `${name}_${ri}`
+    const sgName = `${ruleName}_sg`
+    const sgRows = [
+      ['vpc_id', vpcRef],
+      ['server_group_name', `"${clean(lb.data.name)}-${ri}"`],
+      ['protocol', `"${NLB_SERVER_PROTOCOL[proto] || 'TCP'}"`],
+      ['scheduler', `"${cfg.scheduler}"`],
+    ]
+    if (cfg.connectionDrain) sgRows.push(['connection_drain_enabled', 'true'])
+    if (cfg.preserveClientIp) sgRows.push(['preserve_client_ip_enabled', 'true'])
+    const sgBody = [hclLines(sgRows), nestedBlock('health_check', nlbHealthRows(lbHealthCheck(rule)), 2)]
+    blocks.push(resourceBlock('alicloud_nlb_server_group', sgName, sgBody.join('\n')))
+
+    const lrows = [
+      ['load_balancer_id', lbRef],
+      ['listener_protocol', `"${protoUp}"`],
+      ['listener_port', String(port)],
+      ['server_group_id', `alicloud_nlb_server_group.${sgName}.id`],
+    ]
+    if (cfg.proxyProtocol) lrows.push(['proxy_protocol_enabled', 'true'])
+    blocks.push(resourceBlock('alicloud_nlb_listener', ruleName, hclLines(lrows)))
+
+    lbBackendInstances(ctx, rule).forEach(({ node, index }, bi) => {
+      const attRows = [
+        ['server_group_id', `alicloud_nlb_server_group.${sgName}.id`],
+        ...serverRows(ctx, node, index, port, true),
+      ]
+      blocks.push(resourceBlock('alicloud_nlb_server_group_server_attachment', `${ruleName}_${bi}`, hclLines(attRows)))
+    })
+  })
+}
+
+// 网关型 GWLB：LB 实例 + 服务器组（GENEVE，内联后端）+ 监听器（无端口/协议）
+function exportAliyunGwlb(ctx, lb, cfg, region, blocks) {
+  const { ref } = ctx
+  const name = ctx.name(lb)
+  const lbRef = `alicloud_gwlb_load_balancer.${name}.id`
+  const vpc = lbVpc(ctx, lb)
+  const vpcRef = vpc ? `${ref(vpc)}.id` : '""'
+  const rows = [
+    ['load_balancer_name', `"${clean(lb.data.name)}"`],
+    ['address_ip_version', `"${cfg.ipVersion}"`],
+  ]
+  if (vpc) rows.push(['vpc_id', vpcRef])
+  const zones = aliyunLbZoneMappings(ctx, lb, region)
+    .map((m) => nestedBlock('zone_mappings', [['vswitch_id', m.vswId], ['zone_id', `"${m.zone}"`]], 2))
+    .join('\n')
+  blocks.push(resourceBlock('alicloud_gwlb_load_balancer', name, [hclLines(rows), zones].filter(Boolean).join('\n')))
+
+  ;(lb.data.rules || []).forEach((rule, ri) => {
+    const port = Number(rule.port) || 6081
+    const ruleName = `${name}_${ri}`
+    const sgName = `${ruleName}_sg`
+    const sgRows = [
+      ['vpc_id', vpcRef],
+      ['server_group_name', `"${clean(lb.data.name)}-${ri}"`],
+      ['protocol', '"GENEVE"'],
+      ['scheduler', `"${cfg.scheduler}"`],
+      ['server_failover_mode', `"${cfg.serverFailoverMode}"`],
+    ]
+    const sgBody = [hclLines(sgRows), nestedBlock('health_check_config', gwlbHealthRows(lbHealthCheck(rule)), 2)]
+    if (cfg.connectionDrain) {
+      sgBody.push(nestedBlock('connection_drain_config', [['connection_drain_enabled', 'true']], 2))
+    }
+    for (const { node, index } of lbBackendInstances(ctx, rule)) {
+      sgBody.push(nestedBlock('servers', serverRows(ctx, node, index, port, false), 2))
+    }
+    blocks.push(resourceBlock('alicloud_gwlb_server_group', sgName, sgBody.join('\n')))
+    blocks.push(resourceBlock('alicloud_gwlb_listener', ruleName, [
+      `  load_balancer_id = ${lbRef}`,
+      `  server_group_id  = alicloud_gwlb_server_group.${sgName}.id`,
+    ].join('\n')))
+  })
+}
+
+// 按 lbConfig.type 分发阿里云负载均衡导出
+function exportAliyunLoadBalancer(ctx, lb, region, blocks) {
+  const cfg = aliyunLbConfig(lb)
+  if (cfg.type === 'alb') return exportAliyunAlb(ctx, lb, cfg, region, blocks)
+  if (cfg.type === 'nlb') return exportAliyunNlb(ctx, lb, cfg, region, blocks)
+  if (cfg.type === 'gwlb') return exportAliyunGwlb(ctx, lb, cfg, region, blocks)
+  return exportAliyunClb(ctx, lb, cfg, blocks)
+}
+
 
 export function exportAliyunTerraform(nodes, edges, providerVersion) {
   const ctx = createCloudContext(nodes, edges, resourceTypes)
@@ -206,81 +586,9 @@ ${hclLines(eipRows)}
       })
   }
 
-  // 负载均衡：SLB 实例 + 每个监听规则一个虚拟服务器组/监听器 + 后端附件
+  // 负载均衡：按 lbConfig.type 生成 CLB/ALB/NLB/GWLB 对应的资源组
   for (const lb of nodes.filter((n) => n.type === 'LoadBalancer')) {
-    const sub = lbSubnets(ctx, lb)[0]
-    const rows = [
-      ['load_balancer_name', `"${clean(lb.data.name)}"`],
-      ['address_type', lb.data.internal ? '"intranet"' : '"internet"'],
-      ['load_balancer_spec', '"slb.s2.small"'],
-    ]
-    if (sub) rows.push(['vswitch_id', `${ref(sub)}.id`])
-    blocks.push(`resource "alicloud_slb_load_balancer" "${ctx.name(lb)}" {
-${hclLines(rows)}
-}`)
-    ;(lb.data.rules || []).forEach((rule, ri) => {
-      const ruleName = `${ctx.name(lb)}_${ri}`
-      const sgName = `${ruleName}_sg`
-      const port = Number(rule.port) || 80
-      const proto = String(rule.protocol || 'tcp').toLowerCase()
-      blocks.push(`resource "alicloud_slb_server_group" "${sgName}" {
-  load_balancer_id = ${ref(lb)}.id
-  name             = "${clean(lb.data.name)}-${ri}"
-}`)
-      const lrows = [
-        ['load_balancer_id', `${ref(lb)}.id`],
-        ['frontend_port', String(port)],
-        ['backend_port', String(port)],
-        ['protocol', `"${proto}"`],
-        ['server_group_id', `alicloud_slb_server_group.${sgName}.id`],
-      ]
-      // HTTPS 监听器的 bandwidth 为必填
-      if (proto === 'https') lrows.push(['bandwidth', '10'])
-      // 健康检查：协议 http(s) 用 http 检查并带路径，tcp 用 tcp 检查
-      const hc = lbHealthCheck(rule)
-      if (hc.enabled) {
-        const hcHttp = hc.protocol !== 'tcp'
-        lrows.push(['health_check', '"on"'])
-        lrows.push(['health_check_type', hcHttp ? '"http"' : '"tcp"'])
-        if (hcHttp) lrows.push(['health_check_uri', `"${hc.path}"`])
-        // 阿里云 SLB 的 HTTP 健康检查请求方法仅支持 head/get
-        if (hcHttp && ['GET', 'HEAD'].includes(hc.method)) {
-          lrows.push(['health_check_method', `"${hc.method.toLowerCase()}"`])
-        }
-        if (/^\d+$/.test(hc.port)) lrows.push(['health_check_connect_port', hc.port])
-        lrows.push(['healthy_threshold', String(hc.healthyThreshold)])
-        lrows.push(['unhealthy_threshold', String(hc.unhealthyThreshold)])
-        lrows.push(['health_check_timeout', String(hc.timeout)])
-        lrows.push(['health_check_interval', String(hc.interval)])
-      } else {
-        lrows.push(['health_check', '"off"'])
-      }
-      blocks.push(`resource "alicloud_slb_listener" "${ruleName}" {
-${hclLines(lrows)}
-}`)
-      ;(rule.backends || []).forEach((bid, bi) => {
-        // 解析 bid 格式：可能是 "instId" 或 "instId#index"（多实例展开后）
-        const [instId, indexStr] = bid.split('#')
-        const inst = ctx.byId.get(instId)
-        if (!inst || inst.type !== 'Instance') return
-        // 多实例节点且指定了具体实例：只生成一条后端附件
-        // 多实例节点未指定：为每一台实例各生成一条后端附件
-        const count = instanceCount(inst)
-        const index = indexStr != null ? Number(indexStr) : -1
-        const loops = index >= 0 ? 1 : count
-        const startIdx = index >= 0 ? index : 0
-        for (let k = 0; k < loops; k++) {
-          const instIdx = startIdx + k
-          const resId = loops > 1 ? `${ruleName}_${bi}_${k}` : `${ruleName}_${bi}`
-          blocks.push(`resource "alicloud_slb_server_group_server_attachment" "${resId}" {
-  server_group_id = alicloud_slb_server_group.${sgName}.id
-  server_id       = ${instanceRef(ctx, inst, instIdx)}.id
-  port            = ${port}
-  type            = "ecs"
-}`)
-        }
-      })
-    })
+    exportAliyunLoadBalancer(ctx, lb, region, blocks)
   }
 
   const keyPairs = collectKeyPairs(ctx, nodes)

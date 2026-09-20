@@ -276,6 +276,32 @@ export const NODE_TYPES = {
     defaults: () => ({
       name: 'lb1',
       internal: false,
+      // 阿里云专属负载均衡类型与高级配置（clb 传统型/alb 应用型/nlb 网络型/gwlb 网关型）；
+      // 其他厂商忽略该对象，保持原有单类型行为
+      lbConfig: {
+        type: 'clb',
+        // 通用
+        ipVersion: 'ipv4',
+        scheduler: 'wrr',
+        // CLB（传统型）
+        spec: 'slb.s2.small',
+        internetChargeType: 'paybytraffic',
+        bandwidth: 10,
+        // ALB（应用型）
+        edition: 'Basic',
+        addressAllocatedMode: 'Dynamic',
+        stickySession: false,
+        // ALB/NLB/GWLB 共用
+        connectionDrain: false,
+        // NLB（网络型）
+        crossZone: true,
+        preserveClientIp: false,
+        proxyProtocol: false,
+        // GWLB（网关型）
+        serverFailoverMode: 'NoRebalance',
+        // 腾讯云 GWLB 目标组协议：TENCENT_GENEVE | AWS_GENEVE
+        geneveProtocol: 'TENCENT_GENEVE',
+      },
       // 每条规则 = 一个监听器（协议+端口）+ 后端实例（穿梭框选择，存实例节点 id）+ 健康检查
       rules: [
         {

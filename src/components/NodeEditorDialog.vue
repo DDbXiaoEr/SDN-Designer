@@ -140,9 +140,107 @@ function setEipBinding(i, value) {
   patch('bindings', raw)
 }
 
+// 各厂商支持的负载均衡类型（腾讯云无 NLB；ALB 暂无 Terraform 资源）
+const LB_TYPES = {
+  aliyun: ['clb', 'alb', 'nlb', 'gwlb'],
+  tencent: ['clb', 'gwlb', 'alb'],
+}
+// 各厂商各类型支持的监听协议（gwlb 固定 GENEVE）
+const LB_PROTOCOLS = {
+  aliyun: {
+    clb: ['tcp', 'udp', 'http', 'https'],
+    alb: ['http', 'https', 'quic'],
+    nlb: ['tcp', 'udp', 'tcpssl'],
+    gwlb: ['geneve'],
+  },
+  tencent: {
+    clb: ['tcp', 'udp', 'http', 'https'],
+    alb: ['http', 'https'],
+    gwlb: ['geneve'],
+  },
+}
+// 各厂商各类型支持的健康检查协议
+const LB_HEALTH_PROTOCOLS = {
+  aliyun: {
+    clb: ['tcp', 'http', 'https'],
+    alb: ['http', 'https', 'tcp'],
+    nlb: ['tcp', 'http'],
+    gwlb: ['tcp', 'http'],
+  },
+  tencent: {
+    clb: ['tcp', 'http', 'https'],
+    alb: ['http', 'https'],
+    gwlb: ['tcp'],
+  },
+}
+// IP 协议版本（缺省表示该类型不暴露该字段）
+const LB_IP_VERSIONS = {
+  aliyun: {
+    alb: ['IPv4', 'DualStack'],
+    nlb: ['ipv4', 'DualStack'],
+    gwlb: ['Ipv4'],
+  },
+  tencent: {},
+}
+// 调度算法（取值随厂商/类型不同，导出时原样使用）
+const LB_SCHEDULERS = {
+  aliyun: {
+    clb: ['wrr', 'rr', 'wlc', 'sch'],
+    alb: ['Wrr', 'Wlc', 'Sch'],
+    nlb: ['Wrr', 'Rr', 'Sch', 'Tch', 'Qch'],
+    gwlb: ['5TCH', '3TCH', '2TCH'],
+  },
+  tencent: {},
+}
+const LB_SPECS = ['slb.s1.small', 'slb.s2.small', 'slb.s2.medium', 'slb.s3.small', 'slb.s3.medium', 'slb.s3.large']
+const LB_EDITIONS = ['Basic', 'Standard']
+
+// 负载均衡支持类型选择的厂商（阿里云 / 腾讯云）
+const lbVendor = computed(() =>
+  node.value && node.value.type === 'LoadBalancer' && ['aliyun', 'tencent'].includes(vendor.value)
+    ? vendor.value
+    : null
+)
+const isVendorLb = computed(() => !!lbVendor.value)
+const isAliyunLb = computed(() => lbVendor.value === 'aliyun')
+const isTencentLb = computed(() => lbVendor.value === 'tencent')
+const lbConf = computed(() => (node.value && node.value.data.lbConfig) || {})
+const lbTypeOptions = computed(() => (LB_TYPES[lbVendor.value] || []).map((t) => ({ value: t, label: `inspector.lbTypes.${t}` })))
+const lbType = computed(() => {
+  const list = LB_TYPES[lbVendor.value] || ['clb']
+  const t = String(lbConf.value.type || 'clb').toLowerCase()
+  return list.includes(t) ? t : list[0]
+})
+const lbProtocolOptions = computed(() => (LB_PROTOCOLS[lbVendor.value] || {})[lbType.value] || LB_PROTOCOLS.aliyun.clb)
+const lbHealthProtocolOptions = computed(
+  () => (LB_HEALTH_PROTOCOLS[lbVendor.value] || {})[lbType.value] || LB_HEALTH_PROTOCOLS.aliyun.clb
+)
+const lbIpVersionOptions = computed(() => (LB_IP_VERSIONS[lbVendor.value] || {})[lbType.value] || [])
+const lbSchedulerOptions = computed(() => (LB_SCHEDULERS[lbVendor.value] || {})[lbType.value] || [])
+
+function lbConfigPatch(key, value) {
+  patch('lbConfig', { ...lbConf.value, [key]: value })
+}
+
+// 切换类型时，把不适用于新类型的监听/健康检查协议重置为该类型的首个可用值
+function onLbTypeChange(value) {
+  const v = lbVendor.value
+  const type = String(value).toLowerCase()
+  const protos = (LB_PROTOCOLS[v] || {})[type] || LB_PROTOCOLS.aliyun.clb
+  const hcProtos = (LB_HEALTH_PROTOCOLS[v] || {})[type] || LB_HEALTH_PROTOCOLS.aliyun.clb
+  const rules = (node.value.data.rules || []).map((r) => {
+    const proto = protos.includes(String(r.protocol || '').toLowerCase()) ? r.protocol : protos[0]
+    const hc = { ...lbHealthCheck(r) }
+    if (!hcProtos.includes(hc.protocol)) hc.protocol = hcProtos[0]
+    return { ...r, protocol: proto, healthCheck: hc }
+  })
+  patch('lbConfig', { ...lbConf.value, type })
+  patch('rules', rules)
+}
+
 function addLbRule() {
   const rules = [...(node.value.data.rules || [])]
-  rules.push({ protocol: 'tcp', port: '80', backends: [], healthCheck: lbHealthCheck({}) })
+  rules.push({ protocol: lbProtocolOptions.value[0] || 'tcp', port: '80', backends: [], healthCheck: lbHealthCheck({}) })
   patch('rules', rules)
 }
 function removeLbRule(i) {
@@ -530,16 +628,143 @@ function toggleOutput(key, checked) {
           </label>
         </div>
 
+        <div v-if="isVendorLb" class="section">
+          <div class="section-title">{{ t('inspector.lbTypeTitle') }}</div>
+          <p class="section-hint">{{ t('inspector.lbTypeHint') }}</p>
+          <div class="field">
+            <label>{{ t('inspector.lbType') }}</label>
+            <select :value="lbType" @change="onLbTypeChange($event.target.value)">
+              <option v-for="o in lbTypeOptions" :key="o.value" :value="o.value">{{ t(o.label) }}</option>
+            </select>
+          </div>
+          <p v-if="isTencentLb && lbType === 'alb'" class="section-hint warning">
+            {{ t('inspector.lbAlbUnsupported') }}
+          </p>
+          <div class="hc-grid">
+            <label v-if="isAliyunLb && lbType === 'clb'" class="hc-field">
+              <span>{{ t('inspector.lbSpec') }}</span>
+              <select :value="lbConf.spec || 'slb.s2.small'" @change="lbConfigPatch('spec', $event.target.value)">
+                <option v-for="s in LB_SPECS" :key="s" :value="s">{{ s }}</option>
+              </select>
+            </label>
+            <label v-if="isAliyunLb && lbType === 'clb'" class="hc-field">
+              <span>{{ t('inspector.lbInternetChargeType') }}</span>
+              <select
+                :value="lbConf.internetChargeType || 'paybytraffic'"
+                @change="lbConfigPatch('internetChargeType', $event.target.value)"
+              >
+                <option value="paybytraffic">{{ t('inspector.lbChargeTraffic') }}</option>
+                <option value="paybybandwidth">{{ t('inspector.lbChargeBandwidth') }}</option>
+              </select>
+            </label>
+            <label v-if="isAliyunLb && lbType === 'clb'" class="hc-field">
+              <span>{{ t('inspector.lbBandwidth') }}</span>
+              <input
+                type="number"
+                min="1"
+                :value="lbConf.bandwidth ?? 10"
+                @input="lbConfigPatch('bandwidth', Number($event.target.value))"
+              />
+            </label>
+            <label v-if="isAliyunLb && lbType === 'alb'" class="hc-field">
+              <span>{{ t('inspector.lbEdition') }}</span>
+              <select :value="lbConf.edition || 'Basic'" @change="lbConfigPatch('edition', $event.target.value)">
+                <option v-for="e in LB_EDITIONS" :key="e" :value="e">{{ e }}</option>
+              </select>
+            </label>
+            <label v-if="isAliyunLb && lbType === 'alb'" class="hc-field">
+              <span>{{ t('inspector.lbAddressAllocatedMode') }}</span>
+              <select
+                :value="lbConf.addressAllocatedMode || 'Dynamic'"
+                @change="lbConfigPatch('addressAllocatedMode', $event.target.value)"
+              >
+                <option value="Dynamic">{{ t('inspector.lbAllocatedDynamic') }}</option>
+                <option value="Fixed">{{ t('inspector.lbAllocatedFixed') }}</option>
+              </select>
+            </label>
+            <label v-if="isAliyunLb && lbType === 'gwlb'" class="hc-field">
+              <span>{{ t('inspector.lbServerFailoverMode') }}</span>
+              <select
+                :value="lbConf.serverFailoverMode || 'NoRebalance'"
+                @change="lbConfigPatch('serverFailoverMode', $event.target.value)"
+              >
+                <option value="NoRebalance">NoRebalance</option>
+                <option value="Rebalance">Rebalance</option>
+              </select>
+            </label>
+            <label v-if="isTencentLb && lbType === 'gwlb'" class="hc-field">
+              <span>{{ t('inspector.lbGeneveProtocol') }}</span>
+              <select
+                :value="lbConf.geneveProtocol || 'TENCENT_GENEVE'"
+                @change="lbConfigPatch('geneveProtocol', $event.target.value)"
+              >
+                <option value="TENCENT_GENEVE">TENCENT_GENEVE</option>
+                <option value="AWS_GENEVE">AWS_GENEVE</option>
+              </select>
+            </label>
+            <label v-if="lbIpVersionOptions.length" class="hc-field">
+              <span>{{ t('inspector.lbIpVersion') }}</span>
+              <select :value="lbConf.ipVersion" @change="lbConfigPatch('ipVersion', $event.target.value)">
+                <option v-for="v in lbIpVersionOptions" :key="v" :value="v">{{ v }}</option>
+              </select>
+            </label>
+            <label v-if="lbSchedulerOptions.length" class="hc-field">
+              <span>{{ t('inspector.lbScheduler') }}</span>
+              <select :value="lbConf.scheduler" @change="lbConfigPatch('scheduler', $event.target.value)">
+                <option v-for="s in lbSchedulerOptions" :key="s" :value="s">{{ s }}</option>
+              </select>
+            </label>
+            <label v-if="isAliyunLb && lbType === 'alb'" class="hc-field">
+              <input
+                type="checkbox"
+                :checked="!!lbConf.stickySession"
+                @change="lbConfigPatch('stickySession', $event.target.checked)"
+              />
+              {{ t('inspector.lbStickySession') }}
+            </label>
+            <label v-if="isAliyunLb && ['alb', 'nlb', 'gwlb'].includes(lbType)" class="hc-field">
+              <input
+                type="checkbox"
+                :checked="!!lbConf.connectionDrain"
+                @change="lbConfigPatch('connectionDrain', $event.target.checked)"
+              />
+              {{ t('inspector.lbConnectionDrain') }}
+            </label>
+            <label v-if="isAliyunLb && lbType === 'nlb'" class="hc-field">
+              <input
+                type="checkbox"
+                :checked="lbConf.crossZone !== false"
+                @change="lbConfigPatch('crossZone', $event.target.checked)"
+              />
+              {{ t('inspector.lbCrossZone') }}
+            </label>
+            <label v-if="isAliyunLb && lbType === 'nlb'" class="hc-field">
+              <input
+                type="checkbox"
+                :checked="!!lbConf.preserveClientIp"
+                @change="lbConfigPatch('preserveClientIp', $event.target.checked)"
+              />
+              {{ t('inspector.lbPreserveClientIp') }}
+            </label>
+            <label v-if="isAliyunLb && lbType === 'nlb'" class="hc-field">
+              <input
+                type="checkbox"
+                :checked="!!lbConf.proxyProtocol"
+                @change="lbConfigPatch('proxyProtocol', $event.target.checked)"
+              />
+              {{ t('inspector.lbProxyProtocol') }}
+            </label>
+          </div>
+        </div>
+
         <div v-if="node.type === 'LoadBalancer'" class="section">
           <div class="section-title">{{ t('inspector.lbRulesTitle') }}</div>
           <p class="section-hint">{{ t('inspector.lbBackendHint') }}</p>
           <div v-for="(rule, i) in node.data.rules || []" :key="i" class="rule">
             <div class="rule-row">
-              <select :value="rule.protocol" @change="lbRulePatch(i, 'protocol', $event.target.value)">
-                <option value="tcp">TCP</option>
-                <option value="udp">UDP</option>
-                <option value="http">HTTP</option>
-                <option value="https">HTTPS</option>
+              <input v-if="isVendorLb && lbType === 'gwlb'" value="GENEVE" disabled />
+              <select v-else :value="rule.protocol" @change="lbRulePatch(i, 'protocol', $event.target.value)">
+                <option v-for="p in lbProtocolOptions" :key="p" :value="p">{{ p.toUpperCase() }}</option>
               </select>
               <input
                 :placeholder="t('inspector.lbPortPlaceholder')"
@@ -568,9 +793,7 @@ function toggleOutput(key, checked) {
                   <label class="hc-field">
                     <span>{{ t('inspector.lbHealthProtocol') }}</span>
                     <select :value="lbHealth(rule).protocol" @change="lbHealthPatch(i, 'protocol', $event.target.value)">
-                      <option value="tcp">TCP</option>
-                      <option value="http">HTTP</option>
-                      <option value="https">HTTPS</option>
+                      <option v-for="p in lbHealthProtocolOptions" :key="p" :value="p">{{ p.toUpperCase() }}</option>
                     </select>
                   </label>
                   <label class="hc-field">

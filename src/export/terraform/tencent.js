@@ -1,4 +1,4 @@
-import { createCloudContext, resolveNextHopNode, parsePortRange, resolveVpcRegion, resolveZone, gatewayEips, gatewaySnatSources, vpcSubnets, lbSubnets, lbVpc, lbHealthCheck, instanceLoginAuth, resolveInstanceKeyPair, collectKeyPairs, collectExistingKeyPairs, escapeRegex, resolveInterconnects, routeTablesOfVpc, tlsKeyBlocks, hclLines, systemDiskConfig, dataDiskConfigs, clean, instanceRef, instanceCount, isCountedInstance, instancePrivateIp, instanceNameExpr, eipCount, eipRef, eipNameExpr, eipInstanceCandidates, eipBindings } from './common.js'
+import { createCloudContext, resolveNextHopNode, parsePortRange, resolveVpcRegion, resolveZone, gatewayEips, gatewaySnatSources, vpcSubnets, lbSubnets, lbVpc, lbHealthCheck, lbBackendInstances, instanceLoginAuth, resolveInstanceKeyPair, collectKeyPairs, collectExistingKeyPairs, escapeRegex, resolveInterconnects, routeTablesOfVpc, tlsKeyBlocks, hclLines, systemDiskConfig, dataDiskConfigs, clean, instanceRef, instanceCount, isCountedInstance, instancePrivateIp, instancePrivateIpAt, instanceNameExpr, eipCount, eipRef, eipNameExpr, eipInstanceCandidates, eipBindings } from './common.js'
 import { translate } from '../../i18n/index.js'
 import { buildOutputs } from './outputs.js'
 
@@ -94,6 +94,175 @@ function tencentChargeRows(chargeType) {
     ]
   }
   return [['instance_charge_type', '"POSTPAID_BY_HOUR"']]
+}
+
+// 腾讯云负载均衡类型（ALB 暂无 Terraform 资源，仅提供选择并告警）
+const TENCENT_LB_TYPES = ['clb', 'gwlb', 'alb']
+
+export function tencentLbType(lb) {
+  const t = String((lb.data && lb.data.lbConfig && lb.data.lbConfig.type) || '').toLowerCase()
+  return TENCENT_LB_TYPES.includes(t) ? t : 'clb'
+}
+
+// 腾讯云 GWLB 配置归一化
+function tencentLbConfig(lb) {
+  const c = (lb.data && lb.data.lbConfig) || {}
+  return { geneveProtocol: c.geneveProtocol === 'AWS_GENEVE' ? 'AWS_GENEVE' : 'TENCENT_GENEVE' }
+}
+
+// 传统型 CLB：实例 + 每个监听规则一个监听器/后端绑定
+function exportTencentClb(ctx, lb, blocks) {
+  const { ref } = ctx
+  const vpc = lbVpc(ctx, lb)
+  const sub = lbSubnets(ctx, lb)[0]
+  const rows = [
+    ['clb_name', `"${clean(lb.data.name)}"`],
+    ['network_type', lb.data.internal ? '"INTERNAL"' : '"OPEN"'],
+    ['vpc_id', vpc ? `${ref(vpc)}.id` : `"" # ${tt('unassociatedVpc')}`],
+  ]
+  // 内网 CLB 必须指定子网
+  if (lb.data.internal && sub) rows.push(['subnet_id', `${ref(sub)}.id`])
+  blocks.push(`resource "tencentcloud_clb_instance" "${ctx.name(lb)}" {
+${hclLines(rows)}
+}`)
+  ;(lb.data.rules || []).forEach((rule, ri) => {
+    const ruleName = `${ctx.name(lb)}_${ri}`
+    const port = Number(rule.port) || 80
+    const proto = String(rule.protocol || 'tcp').toUpperCase()
+    // 健康检查：协议 http(s) 用 HTTP(S) 检查并带路径
+    const hc = lbHealthCheck(rule)
+    const hcProto = hc.protocol === 'tcp' ? 'TCP' : hc.protocol.toUpperCase()
+    const lrows = [
+      ['clb_id', `${ref(lb)}.id`],
+      ['listener_name', `"${clean(lb.data.name)}-${ri}"`],
+      ['port', String(port)],
+      ['protocol', `"${proto}"`],
+      ['health_check_switch', hc.enabled ? 'true' : 'false'],
+    ]
+    if (hc.enabled) {
+      lrows.push(['health_check_proto', `"${hcProto}"`])
+      if (hc.protocol !== 'tcp') lrows.push(['health_check_path', `"${hc.path}"`])
+      // 腾讯云 CLB 的 HTTP 健康检查请求方法仅支持 HEAD/GET
+      if (hc.protocol !== 'tcp' && ['GET', 'HEAD'].includes(hc.method)) {
+        lrows.push(['health_check_http_method', `"${hc.method}"`])
+      }
+      lrows.push(['health_check_interval_time', String(hc.interval)])
+      lrows.push(['health_check_time_out', String(hc.timeout)])
+      lrows.push(['health_check_healthy_threshold', String(hc.healthyThreshold)])
+      lrows.push(['health_check_unhealthy_threshold', String(hc.unhealthyThreshold)])
+    }
+    blocks.push(`resource "tencentcloud_clb_listener" "${ruleName}" {
+${hclLines(lrows)}
+}`)
+    const targets = (rule.backends || [])
+      .map((bid) => {
+        // 解析 bid 格式：可能是 "instId" 或 "instId#index"（多实例展开后）
+        const [instId, indexStr] = bid.split('#')
+        const inst = ctx.byId.get(instId)
+        if (!inst || inst.type !== 'Instance') return null
+        const index = indexStr != null ? Number(indexStr) : -1
+        return { inst, index }
+      })
+      .filter(Boolean)
+    if (targets.length) {
+      // 多实例节点且指定了具体实例：只生成一个 targets 块
+      // 多实例节点未指定：每台实例各生成一个 targets 块
+      const targetBlocks = targets
+        .flatMap(({ inst, index }) => {
+          const count = instanceCount(inst)
+          const loops = index >= 0 ? 1 : count
+          const startIdx = index >= 0 ? index : 0
+          return Array.from({ length: loops }, (_, k) => {
+            const instIdx = startIdx + k
+            return `  targets {
+    instance_id = ${instanceRef(ctx, inst, instIdx)}.id
+    port        = ${port}
+    weight      = 10
+  }`
+          })
+        })
+        .join('\n')
+      blocks.push(`resource "tencentcloud_clb_attachment" "${ruleName}" {
+  clb_id      = ${ref(lb)}.id
+  listener_id = tencentcloud_clb_listener.${ruleName}.id
+${targetBlocks}
+}`)
+    }
+  })
+}
+
+// 网关型 GWLB：实例 + 每个监听规则一个目标组（注册后端并关联）
+function exportTencentGwlb(ctx, lb, cfg, blocks) {
+  const { ref } = ctx
+  const name = ctx.name(lb)
+  const vpc = lbVpc(ctx, lb)
+  const sub = lbSubnets(ctx, lb)[0]
+  const vpcRef = vpc ? `${ref(vpc)}.id` : `"" # ${tt('unassociatedVpc')}`
+  const rows = [
+    ['load_balancer_name', `"${clean(lb.data.name)}"`],
+    ['lb_charge_type', '"POSTPAID_BY_HOUR"'],
+    ['vpc_id', vpcRef],
+  ]
+  if (sub) rows.push(['subnet_id', `${ref(sub)}.id`])
+  blocks.push(`resource "tencentcloud_gwlb_instance" "${name}" {
+${hclLines(rows)}
+}`)
+  const lbRef = `tencentcloud_gwlb_instance.${name}.id`
+  ;(lb.data.rules || []).forEach((rule, ri) => {
+    const tg = `${name}_${ri}_tg`
+    const hc = lbHealthCheck(rule)
+    // 腾讯云 GWLB 健康检查仅支持 PING/TCP，且探测端口固定 6081
+    const hcRows = [
+      ['health_switch', hc.enabled ? 'true' : 'false'],
+      ['protocol', '"TCP"'],
+      ['port', '6081'],
+      ['timeout', String(hc.timeout)],
+      ['interval_time', String(hc.interval)],
+      ['health_num', String(hc.healthyThreshold)],
+      ['un_health_num', String(hc.unhealthyThreshold)],
+    ]
+    const hcBlock = `  health_check {\n${hclLines(hcRows).split('\n').map((l) => '  ' + l).join('\n')}\n  }`
+    blocks.push(`resource "tencentcloud_gwlb_target_group" "${tg}" {
+  target_group_name  = "${clean(lb.data.name)}-${ri}"
+  vpc_id             = ${vpcRef}
+  port               = 6081
+  protocol           = "${cfg.geneveProtocol}"
+  schedule_algorithm = "IP_HASH_3_ELASTIC"
+${hcBlock}
+}`)
+    blocks.push(`resource "tencentcloud_gwlb_instance_associate_target_group" "${name}_${ri}_assoc" {
+  load_balancer_id = ${lbRef}
+  target_group_id  = tencentcloud_gwlb_target_group.${tg}.id
+}`)
+    const instances = lbBackendInstances(ctx, rule)
+    if (instances.length) {
+      const targetBlocks = instances
+        .map(({ node, index }) => {
+          const s = ctx.findSubnet(node)
+          const ip = instancePrivateIpAt(node, s && s.data.cidr, index)
+          // 无静态私网 IP 时回退引用实例的 private_ip 属性
+          const bindIp = ip ? `"${ip}"` : `${instanceRef(ctx, node, index)}.private_ip`
+          return `  target_group_instances {
+    bind_ip = ${bindIp}
+    port    = 6081
+    weight  = 16
+  }`
+        })
+        .join('\n')
+      blocks.push(`resource "tencentcloud_gwlb_target_group_register_instances" "${name}_${ri}_reg" {
+  target_group_id = tencentcloud_gwlb_target_group.${tg}.id
+${targetBlocks}
+}`)
+    }
+  })
+}
+
+// 按 lbConfig.type 分发腾讯云负载均衡导出
+function exportTencentLoadBalancer(ctx, lb, blocks) {
+  const type = tencentLbType(lb)
+  if (type === 'alb') return // 腾讯云 ALB 缺少 Terraform 资源，校验阶段已告警
+  if (type === 'gwlb') return exportTencentGwlb(ctx, lb, tencentLbConfig(lb), blocks)
+  return exportTencentClb(ctx, lb, blocks)
 }
 
 export function exportTencentTerraform(nodes, edges, providerVersion) {
@@ -216,84 +385,9 @@ ${hclLines(eipRows)}
     }
   }
 
-  // 负载均衡：CLB 实例 + 每个监听规则一个监听器/后端绑定
+  // 负载均衡：按 lbConfig.type 生成 CLB/GWLB 对应资源（ALB 暂不支持 Terraform）
   for (const lb of nodes.filter((n) => n.type === 'LoadBalancer')) {
-    const vpc = lbVpc(ctx, lb)
-    const sub = lbSubnets(ctx, lb)[0]
-    const rows = [
-      ['clb_name', `"${clean(lb.data.name)}"`],
-      ['network_type', lb.data.internal ? '"INTERNAL"' : '"OPEN"'],
-      ['vpc_id', vpc ? `${ref(vpc)}.id` : `"" # ${tt('unassociatedVpc')}`],
-    ]
-    // 内网 CLB 必须指定子网
-    if (lb.data.internal && sub) rows.push(['subnet_id', `${ref(sub)}.id`])
-    blocks.push(`resource "tencentcloud_clb_instance" "${ctx.name(lb)}" {
-${hclLines(rows)}
-}`)
-    ;(lb.data.rules || []).forEach((rule, ri) => {
-      const ruleName = `${ctx.name(lb)}_${ri}`
-      const port = Number(rule.port) || 80
-      const proto = String(rule.protocol || 'tcp').toUpperCase()
-      // 健康检查：协议 http(s) 用 HTTP(S) 检查并带路径
-      const hc = lbHealthCheck(rule)
-      const hcProto = hc.protocol === 'tcp' ? 'TCP' : hc.protocol.toUpperCase()
-      const lrows = [
-        ['clb_id', `${ref(lb)}.id`],
-        ['listener_name', `"${clean(lb.data.name)}-${ri}"`],
-        ['port', String(port)],
-        ['protocol', `"${proto}"`],
-        ['health_check_switch', hc.enabled ? 'true' : 'false'],
-      ]
-      if (hc.enabled) {
-        lrows.push(['health_check_proto', `"${hcProto}"`])
-        if (hc.protocol !== 'tcp') lrows.push(['health_check_path', `"${hc.path}"`])
-        // 腾讯云 CLB 的 HTTP 健康检查请求方法仅支持 HEAD/GET
-        if (hc.protocol !== 'tcp' && ['GET', 'HEAD'].includes(hc.method)) {
-          lrows.push(['health_check_http_method', `"${hc.method}"`])
-        }
-        lrows.push(['health_check_interval_time', String(hc.interval)])
-        lrows.push(['health_check_time_out', String(hc.timeout)])
-        lrows.push(['health_check_healthy_threshold', String(hc.healthyThreshold)])
-        lrows.push(['health_check_unhealthy_threshold', String(hc.unhealthyThreshold)])
-      }
-      blocks.push(`resource "tencentcloud_clb_listener" "${ruleName}" {
-${hclLines(lrows)}
-}`)
-      const targets = (rule.backends || [])
-        .map((bid) => {
-          // 解析 bid 格式：可能是 "instId" 或 "instId#index"（多实例展开后）
-          const [instId, indexStr] = bid.split('#')
-          const inst = ctx.byId.get(instId)
-          if (!inst || inst.type !== 'Instance') return null
-          const index = indexStr != null ? Number(indexStr) : -1
-          return { inst, index }
-        })
-        .filter(Boolean)
-      if (targets.length) {
-        // 多实例节点且指定了具体实例：只生成一个 targets 块
-        // 多实例节点未指定：每台实例各生成一个 targets 块
-        const targetBlocks = targets
-          .flatMap(({ inst, index }) => {
-            const count = instanceCount(inst)
-            const loops = index >= 0 ? 1 : count
-            const startIdx = index >= 0 ? index : 0
-            return Array.from({ length: loops }, (_, k) => {
-              const instIdx = startIdx + k
-              return `  targets {
-    instance_id = ${instanceRef(ctx, inst, instIdx)}.id
-    port        = ${port}
-    weight      = 10
-  }`
-            })
-          })
-          .join('\n')
-        blocks.push(`resource "tencentcloud_clb_attachment" "${ruleName}" {
-  clb_id      = ${ref(lb)}.id
-  listener_id = tencentcloud_clb_listener.${ruleName}.id
-${targetBlocks}
-}`)
-      }
-    })
+    exportTencentLoadBalancer(ctx, lb, blocks)
   }
 
   const keyPairs = collectKeyPairs(ctx, nodes)

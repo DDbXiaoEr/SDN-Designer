@@ -101,7 +101,7 @@ OVN-Designer/
 | Eip             | cloud   | `name`, `count`(数量，>1 表示多个公网 IP，导出为 Terraform `count`), `bandwidth`, `internetChargeType`(payByTraffic/payByBandwidth), `bindings{序号:{id,index}\|null}`（按 EIP 序号记录绑定，兼容旧 `{实例节点id:序号}`） |
 | SecurityGroup   | cloud   | `name`, `rules[]`                                  |
 | Instance        | cloud   | `name`, `count`(数量，>1 表示多台同规格实例，导出为 Terraform `count`), `imageId`, `instanceType`, `chargeType`(subscription/payAsYouGo/spot), `privateIp`, `loginType`(keyPair/password), `keyPair`, `password`, `systemDisk{type,size}`, `dataDisks[{type,size}]` |
-| LoadBalancer    | cloud   | `name`, `internal`, `rules[{protocol, port, backends[], healthCheck{enabled,protocol,method,path,body,port,interval,timeout,healthyThreshold,unhealthyThreshold}}]`（每条规则=监听器+后端实例 id+健康检查） |
+| LoadBalancer    | cloud   | `name`, `internal`, `rules[{protocol, port, backends[], healthCheck{enabled,protocol,method,path,body,port,interval,timeout,healthyThreshold,unhealthyThreshold}}]`（每条规则=监听器+后端实例 id+健康检查）, `lbConfig{type, ipVersion, scheduler, spec, internetChargeType, bandwidth, edition, addressAllocatedMode, stickySession, connectionDrain, crossZone, preserveClientIp, proxyProtocol, serverFailoverMode, geneveProtocol}`（阿里云/腾讯云负载均衡类型与高级配置） |
 | RouteTable      | cloud   | `name`, `routes[]`                                 |
 | Interconnect    | cloud   | `name`（VPC 对等连接，连接多个 VPC）               |
 | KeyPair         | cloud   | `name`, `mode`(create/existing)（登录密钥对，绑定实例） |
@@ -196,6 +196,21 @@ OVN-Designer/
   `huaweicloud_elb_pool` + `huaweicloud_elb_member` + `huaweicloud_elb_monitor`；AWS `aws_lb`（HTTP/HTTPS 用 application，否则 network）+
   `aws_lb_target_group`（`health_check` 块，AWS 强制启用）+ `aws_lb_listener` + `aws_lb_target_group_attachment`。
   `lbSubnets`/`lbVpc` 确定部署子网与 VPC；`validateLoadBalancers` 生成未接网络/未选后端的告警。
+- `LoadBalancer` 的 `data.lbConfig` 支持**按厂商选择负载均衡类型与高级配置**（仅阿里云/腾讯云；其他厂商沿用单一类型）：
+  - `type`：阿里云 `clb`/`alb`/`nlb`/`gwlb`，腾讯云 `clb`/`gwlb`/`alb`（`clb` 为默认，兼容旧设计）。
+  - 高级项：CLB 规格/计费/带宽（阿里云）、ALB 版本/地址分配模式/会话保持、NLB 跨可用区/保留客户端 IP/Proxy Protocol、
+    GWLB 故障转移策略（阿里云）/GENEVE 协议（腾讯云），以及通用 IP 协议版本、调度算法；监听协议与健康检查协议按类型联动。
+  - 阿里云导出按类型分发（`aliyun.js`）：`clb` → `alicloud_slb_*`；`alb` → `alicloud_alb_load_balancer`（`zone_mappings`≥2、`load_balancer_billing_config`）+
+    `alicloud_alb_server_group`（内联 `servers` + `health_check_config`）+ `alicloud_alb_listener`（`default_actions`）；
+    `nlb` → `alicloud_nlb_load_balancer`（`load_balancer_type="Network"`、`zone_mappings`）+ `alicloud_nlb_server_group`（`health_check`）+
+    `alicloud_nlb_listener` + `alicloud_nlb_server_group_server_attachment`；`gwlb` → `alicloud_gwlb_load_balancer`（`zone_mappings`≥1）+
+    `alicloud_gwlb_server_group`（`protocol="GENEVE"`、内联 `servers`）+ `alicloud_gwlb_listener`。
+    可用区映射由接入子网的 `vswitch_id` + `Subnet.data.zone` 推导（`aliyunLbZoneMappings`）。
+  - 腾讯云导出按类型分发（`tencent.js`）：`clb` → `tencentcloud_clb_*`；`gwlb` → `tencentcloud_gwlb_instance` +
+    `tencentcloud_gwlb_target_group`（`protocol=TENCENT_GENEVE/AWS_GENEVE`、探测端口 6081）+ `tencentcloud_gwlb_target_group_register_instances` +
+    `tencentcloud_gwlb_instance_associate_target_group`；`alb` 因腾讯云 Terraform Provider 暂无 ALB 资源，导出时跳过并告警（`lbAlbUnsupported`）。
+  - 校验：`validateLoadBalancers` 按厂商类型校验可用区数量（阿里云 ALB/NLB≥2、GWLB≥1）、监听协议是否适用类型、
+    阿里云 GWLB 所需 provider 版本（≥1.234）、腾讯云 ALB 不支持导出等；编辑器类型选择器仅对阿里云/腾讯云显示。
 - Instance 的「镜像」与「实例规格」为「下拉 + 可手输」控件（`combo` 字段：`select` 列出全部候选 + 「自定义…」项，
   选中后显示文本框手输；当前值不在候选列表时自动进入自定义），清单来自 `store/catalog.js`：
   以 `images.js` / `instanceTypes.js` 的本地内置清单为基底，按 `value` 合并在线清单（同项在线覆盖）。

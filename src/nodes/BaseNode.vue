@@ -46,7 +46,7 @@ function handleTop(i, total) {
       :style="{ top: handleTop(i, targetIds.length) }"
     />
     <div class="node-header">
-      <span class="badge">{{ nodeBadge(props.type, vendor) }}</span>
+      <span class="badge">{{ nodeBadge(props.type, vendor, props.data) }}</span>
       <span class="node-name">{{ displayName }}</span>
       <span v-if="data.count > 1" class="count">×{{ data.count }}</span>
       <span v-if="data.controller" class="ctrl">{{ t('nodes.controllerBadge') }}</span>
