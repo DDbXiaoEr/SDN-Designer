@@ -3,8 +3,9 @@
 English | [中文](./README.md)
 
 A Go + Gin cloud vendor catalog proxy: fetches **images** and **instance types** by region
-(Tencent Cloud additionally returns the zones in stock), normalizes them into JSON and returns
-them to the frontend, where `src/store/catalog.js` consumes them via `VITE_CATALOG_API_URL`.
+(including GPU instance types and related images; Tencent Cloud additionally returns the zones
+in stock), normalizes them into JSON and returns them to the frontend, where
+`src/store/catalog.js` consumes them via `VITE_CATALOG_API_URL`.
 
 ## Why a backend is needed
 
@@ -23,8 +24,11 @@ leaking credentials, so this service signs and normalizes the calls on the front
 | GET | `/api/providerVersions` | Published Terraform provider versions per vendor (fetched from the Registry) |
 | GET | `/api/providerVersions/:vendor` | Published versions for a single vendor |
 
-- `kind`: `images` or `instanceTypes`
+- `kind`: `images` / `instanceTypes` (full lists) or `gpuImages` / `gpuInstanceTypes` (GPU-only)
 - `vendor`: `tencent` / `aliyun` / `aws` / `huawei`
+
+`gpuImages` / `gpuInstanceTypes` share the cache of the corresponding full list and are filtered
+server-side by the `gpu` flag.
 
 Response:
 
@@ -35,13 +39,18 @@ Response:
   "region": "ap-guangzhou",
   "items": [
     { "value": "SA3.MEDIUM4", "label": "SA3.MEDIUM4 (2 vCPU / 4 GiB)",
-      "zones": ["ap-guangzhou-5", "ap-guangzhou-6", "ap-guangzhou-7"] }
+      "zones": ["ap-guangzhou-5", "ap-guangzhou-6", "ap-guangzhou-7"] },
+    { "value": "GN7.2XLARGE32", "label": "GN7.2XLARGE32 (8 vCPU / 32 GiB) [1x NVIDIA T4]",
+      "zones": ["ap-guangzhou-3", "ap-guangzhou-6"],
+      "gpu": true, "gpuSpec": "NVIDIA T4", "gpuCount": 1 }
   ]
 }
 ```
 
 `zones` lists the zones where the instance type is in stock (full AZ ID); omitted means
 unrestricted, and it can be fed directly into the frontend's zone stock validation.
+GPU items also carry `gpu` / `gpuSpec` / `gpuCount` / `gpuMemoryGiB` (model, card count, per-GPU
+memory in GiB; omitted for non-GPU items).
 
 Provider versions response (`source` is `registry` or `mock`, `versions` sorted from newest to oldest):
 
@@ -110,7 +119,8 @@ go build -o server . && ./server
 
 ## Frontend integration
 
-Configure in the project root's `.env` (`{kind}` is replaced with `images` / `instanceTypes`):
+Configure in the project root's `.env` (`{kind}` is replaced with `images` / `instanceTypes`;
+GPU subsets are available as `gpuImages` / `gpuInstanceTypes`):
 
 ```
 VITE_CATALOG_API_URL=http://localhost:8080/api/{kind}/{vendor}

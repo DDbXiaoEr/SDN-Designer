@@ -3,9 +3,9 @@ import { VENDOR_REGIONS, defaultRegion, defaultZone } from './regions.js'
 import { chargeTypeOptions, defaultChargeType } from './chargeTypes.js'
 import { diskTypeOptions, defaultDiskType } from './disks.js'
 import {
-  imageOptions,
+  instanceImageOptions,
+  instanceTypeCatalog,
   defaultImage,
-  instanceTypeOptions,
   defaultInstanceType,
 } from '../store/catalog.js'
 
@@ -100,12 +100,13 @@ export function retargetCloudNodeData(type, data, vendor) {
       break
     }
     case 'Instance': {
-      const images = optionValues(imageOptions(vendor))
-      const types = optionValues(instanceTypeOptions(vendor))
+      const gpu = !!data.gpu
+      const images = optionValues(instanceImageOptions(vendor, gpu))
+      const types = optionValues(instanceTypeCatalog(vendor, gpu))
       const charges = optionValues(chargeTypeOptions(vendor))
       const disks = optionValues(diskTypeOptions(vendor))
-      if (!images.has(data.imageId)) patch.imageId = defaultImage(vendor)
-      if (!types.has(data.instanceType)) patch.instanceType = defaultInstanceType(vendor)
+      if (!images.has(data.imageId)) patch.imageId = defaultImage(vendor, gpu)
+      if (!types.has(data.instanceType)) patch.instanceType = defaultInstanceType(vendor, gpu)
       if (!charges.has(data.chargeType)) patch.chargeType = defaultChargeType()
       const sys = data.systemDisk || {}
       if (!disks.has(sys.type)) patch.systemDisk = { ...sys, type: defaultDiskType(vendor) }

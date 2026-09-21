@@ -100,7 +100,7 @@ OVN-Designer/
 | Gateway         | cloud   | `name`（NAT 网关）                                 |
 | Eip             | cloud   | `name`, `count`(数量，>1 表示多个公网 IP，导出为 Terraform `count`), `bandwidth`, `internetChargeType`(payByTraffic/payByBandwidth), `bindings{序号:{id,index}\|null}`（按 EIP 序号记录绑定，兼容旧 `{实例节点id:序号}`） |
 | SecurityGroup   | cloud   | `name`, `rules[]`                                  |
-| Instance        | cloud   | `name`, `count`(数量，>1 表示多台同规格实例，导出为 Terraform `count`), `imageId`, `instanceType`, `chargeType`(subscription/payAsYouGo/spot), `privateIp`, `loginType`(keyPair/password), `keyPair`, `password`, `systemDisk{type,size}`, `dataDisks[{type,size}]` |
+| Instance        | cloud   | `name`, `count`(数量，>1 表示多台同规格实例，导出为 Terraform `count`), `gpu`(部署 GPU 实例，规格/镜像切到 GPU 清单), `gpuDriver`(none/nvidia), `gpuDriverVersion`, `imageId`, `instanceType`, `chargeType`(subscription/payAsYouGo/spot), `privateIp`, `loginType`(keyPair/password), `keyPair`, `password`, `systemDisk{type,size}`, `dataDisks[{type,size}]` |
 | LoadBalancer    | cloud   | `name`, `internal`, `rules[{protocol, port, backends[], healthCheck{enabled,protocol,method,path,body,port,interval,timeout,healthyThreshold,unhealthyThreshold}}]`（每条规则=监听器+后端实例 id+健康检查）, `lbConfig{type, ipVersion, scheduler, spec, internetChargeType, bandwidth, edition, addressAllocatedMode, stickySession, connectionDrain, crossZone, preserveClientIp, proxyProtocol, serverFailoverMode, geneveProtocol}`（阿里云/腾讯云负载均衡类型与高级配置） |
 | RouteTable      | cloud   | `name`, `routes[]`                                 |
 | Interconnect    | cloud   | `name`（VPC 对等连接，连接多个 VPC）               |
@@ -146,7 +146,7 @@ OVN-Designer/
 - 切换云厂商时（`Toolbar` 触发 `change-vendor`，`App.vue` 的 `onVendorChange`），除标签/徽标变化外，
   还会用 `vendors.js` 的 `retargetCloudNodeData(type, data, vendor)` 迁移画布上已有云节点的厂商相关配置：
   当前值在新厂商候选中仍有效（如地域/可用区/镜像/规格/计费方式/云盘类型）则保留，否则替换为新厂商默认值
-  （`VPC.region`、`Subnet.zone`、`Instance.imageId`/`instanceType`/`chargeType`/`systemDisk`/`dataDisks`）。
+  （`VPC.region`、`Subnet.zone`、`Instance.imageId`/`instanceType`/`chargeType`/`systemDisk`/`dataDisks`；`gpu` 开启时镜像/规格按 GPU 清单迁移）。
 - Terraform 导出按厂商分发（`export/terraform/index.js`）；OVN 导出与厂商无关。
 - VPC 的「地域」按当前厂商从 `regions.js` 下拉选择；Terraform 导出的 provider 默认地域取自首个 VPC 的 `region`。
 - Instance 的「计费方式」按当前厂商从 `chargeTypes.js` 下拉选择（包年包月/按量付费/抢占式）；
@@ -211,13 +211,18 @@ OVN-Designer/
     `tencentcloud_gwlb_instance_associate_target_group`；`alb` 因腾讯云 Terraform Provider 暂无 ALB 资源，导出时跳过并告警（`lbAlbUnsupported`）。
   - 校验：`validateLoadBalancers` 按厂商类型校验可用区数量（阿里云 ALB/NLB≥2、GWLB≥1）、监听协议是否适用类型、
     阿里云 GWLB 所需 provider 版本（≥1.234）、腾讯云 ALB 不支持导出等；编辑器类型选择器仅对阿里云/腾讯云显示。
+- Instance 可勾选「部署 GPU 实例」：规格/镜像下拉切到 GPU 清单（`catalog.js` 的 `instanceTypeCatalog` / `instanceImageOptions`），
+  编辑器显示 GPU 型号/卡数/显存（来自规格条目）与驱动安装（`gpuDriver`/`gpuDriverVersion`）；
+  选择安装 NVIDIA 驱动时导出写入实例 `user_data`（腾讯云为 `user_data_raw`）。未勾选时排除 GPU 规格/镜像。
 - Instance 的「镜像」与「实例规格」为「下拉 + 可手输」控件（`combo` 字段：`select` 列出全部候选 + 「自定义…」项，
   选中后显示文本框手输；当前值不在候选列表时自动进入自定义），清单来自 `store/catalog.js`：
   以 `images.js` / `instanceTypes.js` 的本地内置清单为基底，按 `value` 合并在线清单（同项在线覆盖）。
   在线来源通过构建时环境变量注入：`VITE_CATALOG_URL`（远程 JSON）优先，其次 `VITE_CATALOG_API_URL`
   （厂商 API 代理，支持 `{vendor}` / `{kind}` 占位符），配置见 `.env.example`；拉取失败时自动回退本地。
   代理服务见 `server/`（Go + Gin）：`GET /api/:kind/:vendor[/:region]` 用厂商 AK/SK 签名调用
-  `DescribeImages` / `DescribeInstanceTypes`（腾讯云另有可用区库存 `zones`），未配置密钥的厂商返回 501；
+  `DescribeImages` / `DescribeInstanceTypes`（腾讯云另有可用区库存 `zones`）；
+  `kind` 还可为 `gpuImages` / `gpuInstanceTypes`，从全量清单中过滤 GPU 规格与相关镜像
+  （项上带 `gpu` / `gpuSpec` / `gpuCount` / `gpuMemoryGiB`），未配置密钥的厂商返回 501；
   密钥等配置在 `server/config.yaml`（YAML，环境变量可覆盖），`server/config.example.yaml` 为示例，
   `mock: true` 可无凭证联调。
 - 规格条目可带 `zones`（该规格有货的完整可用区 ID 列表，缺省表示不限制），`catalog.js` 归一化时保留，

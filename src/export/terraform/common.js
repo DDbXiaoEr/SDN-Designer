@@ -654,6 +654,36 @@ resource "local_file" "${resName}" {
 }`
 }
 
+// 部署 GPU 且选择安装 NVIDIA 驱动时，生成 cloud-init user_data 脚本。
+// 未勾选 GPU、驱动为 none、或镜像已带驱动时返回空，不写入 user_data。
+export function gpuDriverUserData(data) {
+  if (!data || !data.gpu || data.gpuDriver !== 'nvidia') return ''
+  const version = clean(data.gpuDriverVersion)
+  const pin = version
+    ? `DRIVER_PKG="nvidia-driver-${version}"`
+    : 'DRIVER_PKG="nvidia-driver-535"'
+  return `#!/bin/bash
+set -eux
+${pin}
+if command -v apt-get >/dev/null 2>&1; then
+  apt-get update -y
+  DEBIAN_FRONTEND=noninteractive apt-get install -y "$DRIVER_PKG" || DEBIAN_FRONTEND=noninteractive apt-get install -y nvidia-driver
+elif command -v yum >/dev/null 2>&1; then
+  yum install -y gcc kernel-devel
+  yum install -y nvidia-driver || true
+fi
+nvidia-smi || true
+`
+}
+
+// GPU 驱动安装脚本的 HCL 表达式（<<-EOT heredoc）；无需安装时返回空串
+export function gpuUserDataExpr(data) {
+  const script = gpuDriverUserData(data)
+  if (!script) return ''
+  return `<<-EOT
+${script}EOT`
+}
+
 // 实例登录认证：password 优先，否则使用密钥对
 export function instanceLoginAuth(data) {
   if (data && data.loginType === 'password') {

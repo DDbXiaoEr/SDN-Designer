@@ -1,4 +1,4 @@
-import { createCloudContext, resolveNextHopNode, resolveVpcRegion, resolveZone, gatewayEips, gatewaySnatSources, lbSubnets, lbVpc, lbHealthCheck, lbBackendInstances, instanceLoginAuth, resolveInstanceKeyPair, collectKeyPairs, resolveInterconnects, routeTablesOfVpc, hclLines, systemDiskConfig, dataDiskConfigs, clean, instanceRef, instanceCount, isCountedInstance, instancePrivateIp, instancePrivateIpAt, instanceNameExpr, eipCount, eipRef, eipNameExpr, eipInstanceCandidates, eipBindings } from './common.js'
+import { createCloudContext, resolveNextHopNode, resolveVpcRegion, resolveZone, gatewayEips, gatewaySnatSources, lbSubnets, lbVpc, lbHealthCheck, lbBackendInstances, instanceLoginAuth, resolveInstanceKeyPair, collectKeyPairs, resolveInterconnects, routeTablesOfVpc, hclLines, systemDiskConfig, dataDiskConfigs, gpuUserDataExpr, clean, instanceRef, instanceCount, isCountedInstance, instancePrivateIp, instancePrivateIpAt, instanceNameExpr, eipCount, eipRef, eipNameExpr, eipInstanceCandidates, eipBindings } from './common.js'
 import { translate } from '../../i18n/index.js'
 import { buildOutputs } from './outputs.js'
 
@@ -625,6 +625,8 @@ ${hclLines(eipRows)}
       ['system_disk_category', `"${sysDisk.type}"`],
       ['system_disk_size', String(sysDisk.size)],
     ]
+    const gpuUserData = gpuUserDataExpr(inst.data)
+    if (gpuUserData) rows.push(['user_data', gpuUserData])
     if (sgRefs.length) rows.push(['security_groups', `[${sgRefs.join(', ')}]`])
     if (kp) {
       // 新建密钥对引用生成的资源；关联现有密钥对直接按名称引用

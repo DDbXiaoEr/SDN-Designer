@@ -1,4 +1,4 @@
-import { createCloudContext, resolveNextHopNode, parsePortRange, resolveVpcRegion, resolveZone, gatewayEips, lbSubnets, lbVpc, lbHealthCheck, instanceLoginAuth, resolveInstanceKeyPair, collectKeyPairs, resolveInterconnects, routeTablesOfVpc, tlsKeyBlocks, hclLines, systemDiskConfig, dataDiskConfigs, clean, instanceRef, instanceCount, isCountedInstance, instancePrivateIp, instanceNameExpr, eipCount, eipRef, eipNameExpr, eipInstanceCandidates, eipBindings } from './common.js'
+import { createCloudContext, resolveNextHopNode, parsePortRange, resolveVpcRegion, resolveZone, gatewayEips, lbSubnets, lbVpc, lbHealthCheck, instanceLoginAuth, resolveInstanceKeyPair, collectKeyPairs, resolveInterconnects, routeTablesOfVpc, tlsKeyBlocks, hclLines, systemDiskConfig, dataDiskConfigs, gpuUserDataExpr, clean, instanceRef, instanceCount, isCountedInstance, instancePrivateIp, instanceNameExpr, eipCount, eipRef, eipNameExpr, eipInstanceCandidates, eipBindings } from './common.js'
 import { translate } from '../../i18n/index.js'
 import { buildOutputs } from './outputs.js'
 
@@ -277,6 +277,8 @@ ${tlsKeyBlocks(keyName, resName)}`)
       inst.data.chargeType === 'spot'
         ? `\n\n  instance_market_options {\n    market_type = "spot"\n  }`
         : ''
+    const gpuUserData = gpuUserDataExpr(inst.data)
+    const userDataLine = gpuUserData ? `\n  user_data     = ${gpuUserData}` : ''
     const counted = isCountedInstance(inst)
     // 多实例按子网 CIDR 顺序分配私网 IP；单实例保持固定值
     const priv = counted
@@ -301,7 +303,7 @@ ${tlsKeyBlocks(keyName, resName)}`)
     blocks.push(`resource "aws_instance" "${ctx.name(inst)}" {${countLine}
   ami           = "${inst.data.imageId}"
   instance_type = "${inst.data.instanceType}"
-  subnet_id     = ${vswRef}${sgLine}${privLine}${authLine}${marketLine}
+  subnet_id     = ${vswRef}${sgLine}${privLine}${authLine}${userDataLine}${marketLine}
 
   root_block_device {
     volume_type = "${sysDisk.type}"

@@ -1,4 +1,4 @@
-// OVN-Designer 在线清单服务：代理各云厂商 API，返回镜像/实例规格清单。
+// OVN-Designer 在线清单服务：代理各云厂商 API，返回镜像/实例规格清单（含 GPU）。
 package main
 
 import (

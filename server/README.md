@@ -2,7 +2,7 @@
 
 [English](./README.en.md) | 中文
 
-Go + Gin 实现的云厂商清单代理：按地域拉取**镜像**与**实例规格**（腾讯云额外返回有货可用区），
+Go + Gin 实现的云厂商清单代理：按地域拉取**镜像**与**实例规格**（含 GPU 规格与相关镜像，腾讯云额外返回有货可用区），
 以规范化 JSON 返回给前端，供 `src/store/catalog.js` 通过 `VITE_CATALOG_API_URL` 使用。
 
 ## 为什么需要后端
@@ -21,8 +21,10 @@ Go + Gin 实现的云厂商清单代理：按地域拉取**镜像**与**实例�
 | GET | `/api/providerVersions` | 各厂商 Terraform provider 已发布版本（从 Registry 拉取） |
 | GET | `/api/providerVersions/:vendor` | 单个厂商的已发布版本 |
 
-- `kind`：`images` 或 `instanceTypes`
+- `kind`：`images` / `instanceTypes`（全量）或 `gpuImages` / `gpuInstanceTypes`（仅 GPU）
 - `vendor`：`tencent` / `aliyun` / `aws` / `huawei`
+
+`gpuImages` / `gpuInstanceTypes` 与对应全量清单共用缓存，服务端按 `gpu` 字段过滤后返回。
 
 响应：
 
@@ -33,12 +35,16 @@ Go + Gin 实现的云厂商清单代理：按地域拉取**镜像**与**实例�
   "region": "ap-guangzhou",
   "items": [
     { "value": "SA3.MEDIUM4", "label": "SA3.MEDIUM4 (2 vCPU / 4 GiB)",
-      "zones": ["ap-guangzhou-5", "ap-guangzhou-6", "ap-guangzhou-7"] }
+      "zones": ["ap-guangzhou-5", "ap-guangzhou-6", "ap-guangzhou-7"] },
+    { "value": "GN7.2XLARGE32", "label": "GN7.2XLARGE32 (8 vCPU / 32 GiB) [1x NVIDIA T4]",
+      "zones": ["ap-guangzhou-3", "ap-guangzhou-6"],
+      "gpu": true, "gpuSpec": "NVIDIA T4", "gpuCount": 1 }
   ]
 }
 ```
 
 `zones` 为该规格有货的可用区（完整 AZ ID），缺省表示不限制，可直接对接前端的可用区库存校验。
+GPU 项额外带 `gpu` / `gpuSpec` / `gpuCount` / `gpuMemoryGiB`（型号、卡数、单卡显存 GiB；缺省表示非 GPU）。
 
 provider 版本响应（`source` 为 `registry` 或 `mock`，`versions` 按版本号从新到旧排序）：
 
@@ -103,7 +109,7 @@ go build -o server . && ./server
 
 ## 对接前端
 
-在项目根目录 `.env` 中配置（`{kind}` 会被替换为 `images` / `instanceTypes`）：
+在项目根目录 `.env` 中配置（`{kind}` 会被替换为 `images` / `instanceTypes`；GPU 子集可用 `gpuImages` / `gpuInstanceTypes`）：
 
 ```
 VITE_CATALOG_API_URL=http://localhost:8080/api/{kind}/{vendor}

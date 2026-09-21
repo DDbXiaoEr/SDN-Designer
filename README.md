@@ -16,7 +16,7 @@
 - 🖥️ OVN 逻辑网络：逻辑交换机 / 逻辑路由器 / 虚拟机 / 宿主机（Chassis，可配置网卡与隧道封装）。
 - ☁️ 多云资源：切换阿里云 / 腾讯云 / AWS / 华为云，覆盖 VPC / 子网 / 网关 / 弹性公网 IP / 安全组 / 实例 / 路由表 / 密钥对。
 - 🔗 多 VPC 互联：拖入「对等连接」节点并连接多个 VPC，导出时按两两全互联生成对等连接，并为各 VPC 的路由表自动补全路由。
-- 🧩 实例配置：镜像与规格为「下拉 + 可手输」控件（本地内置清单 + 在线清单合并，可自定义输入），支持计费方式、系统盘 / 数据盘（类型、容量）与登录认证。
+- 🧩 实例配置：镜像与规格为「下拉 + 可手输」控件（本地内置清单 + 在线清单合并，可自定义输入），支持计费方式、系统盘 / 数据盘（类型、容量）与登录认证；勾选「部署 GPU 实例」后切换 GPU 规格/镜像，并可配置驱动安装。
 - 🔑 密钥对节点：`Instance → KeyPair` 连线绑定实例，可选择「新建密钥对」（由 Terraform 生成并保存私钥）或「关联现有密钥对」（引用云上已有密钥）；绑定后实例编辑器隐藏内联密钥对字段。
 - 🧾 创建后属性输出：可勾选资源 ID、公网 IP 等云上创建后才可知的属性，导出时生成 `output.tf`。
 - 🏷️ Provider 版本：工具栏可设置当前厂商 provider 的版本约束，支持从已发布版本下拉选择（自动生成 `~> 主.次`）或手动输入。
@@ -90,12 +90,12 @@ npm run preview # 预览生产构建
 
 1. 复制 [`.env.example`](./.env.example) 为 `.env`，设置 `VITE_CATALOG_API_URL`（`VITE_` 前缀变量在构建时注入）。
 2. 代理地址支持两种模式（实现见 `src/store/catalog.js` 的 `loadFromApi`）：
-   - **按需请求**：URL 含 `{vendor}` / `{kind}` 占位符时，会对 4 个厂商（`aliyun` / `tencent` / `aws` / `huawei`）× 2 种类型（`images` / `instanceTypes`）分别发起请求，例如：
+   - **按需请求**：URL 含 `{vendor}` / `{kind}` 占位符时，会对 4 个厂商（`aliyun` / `tencent` / `aws` / `huawei`）× 2 种类型（`images` / `instanceTypes`）分别发起请求（GPU 子集可用 `gpuImages` / `gpuInstanceTypes`），例如：
      ```bash
      VITE_CATALOG_API_URL=https://catalog.example.com/api/{kind}/{vendor}
      ```
    - **完整清单**：URL 不含占位符时，视为一次返回 `{ "images": { "<vendor>": [...] }, "instanceTypes": { ... } }`。
-3. 每个清单项可以是字符串，或 `{ value, label }`（也兼容 `{ id, name }`）；响应可直接返回数组，或包在 `{ "items": [...] }` / `{ "values": [...] }` 中。
+3. 每个清单项可以是字符串，或 `{ value, label }`（也兼容 `{ id, name }`）；响应可直接返回数组，或包在 `{ "items": [...] }` / `{ "values": [...] }` 中。GPU 项可带 `gpu` / `gpuSpec` / `gpuCount` / `gpuMemoryGiB`。
 
 ## Provider 版本
 

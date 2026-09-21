@@ -3,6 +3,7 @@ package provider
 import (
 	"context"
 	"fmt"
+	"strconv"
 
 	"ovndesigner/server/internal/catalog"
 	"ovndesigner/server/internal/config"
@@ -64,7 +65,14 @@ func (p *huaweiProvider) Images(_ context.Context, region string) ([]catalog.Ite
 		if label == "" {
 			label = img.Id
 		}
-		items = append(items, catalog.Item{Value: img.Id, Label: label})
+		item := catalog.Item{Value: img.Id, Label: label}
+		// IMS 公共镜像通过 __support_kvm_gpu_type / __support_xen_gpu_type 标明 GPU 适用
+		if (img.SupportKvmGpuType != nil && *img.SupportKvmGpuType != "") ||
+			(img.SupportXenGpuType != nil && *img.SupportXenGpuType != "") ||
+			catalog.LooksLikeGPUImage(label) {
+			item.GPU = true
+		}
+		items = append(items, item)
 	}
 	return items, nil
 }
@@ -91,7 +99,56 @@ func (p *huaweiProvider) InstanceTypes(_ context.Context, region string) ([]cata
 		if f.Vcpus != "" || f.Ram > 0 {
 			label = fmt.Sprintf("%s (%s vCPU / %g GiB)", value, f.Vcpus, float64(f.Ram)/1024)
 		}
-		items = append(items, catalog.Item{Value: value, Label: label})
+		item := catalog.Item{Value: value, Label: label}
+		if spec, count, memGiB, ok := huaweiGPU(f.OsExtraSpecs); ok {
+			item.GPU = true
+			item.GPUSpec = spec
+			item.GPUCount = count
+			item.GPUMemoryGiB = memGiB
+			item.Label = catalog.GPULabel(label, spec, count)
+		}
+		items = append(items, item)
 	}
 	return items, nil
+}
+
+// huaweiGPU 从规格 extra_specs 提取 GPU 信息。
+func huaweiGPU(extra *ecsmodel.FlavorExtraSpec) (spec string, count float64, memGiB float64, ok bool) {
+	if extra == nil {
+		return "", 0, 0, false
+	}
+	if extra.Ecsperformancetype != nil && *extra.Ecsperformancetype == "gpu" {
+		ok = true
+	}
+	if extra.PciPassthroughenableGpu != nil && *extra.PciPassthroughenableGpu == "true" {
+		ok = true
+	}
+	if extra.Infogpuname != nil && *extra.Infogpuname != "" {
+		spec = *extra.Infogpuname
+		ok = true
+	}
+	if extra.PciPassthroughgpuSpecs != nil && *extra.PciPassthroughgpuSpecs != "" && spec == "" {
+		spec = *extra.PciPassthroughgpuSpecs
+		ok = true
+	}
+	if extra.PciPassthroughalias != nil && *extra.PciPassthroughalias != "" && spec == "" {
+		spec = *extra.PciPassthroughalias
+		ok = true
+	}
+	if extra.Quotagpu != nil && *extra.Quotagpu != "" {
+		ok = true
+		if n, err := strconv.ParseFloat(*extra.Quotagpu, 64); err == nil {
+			count = n
+		}
+	}
+	if extra.Infogpus != nil && *extra.Infogpus != "" {
+		ok = true
+		if spec == "" {
+			spec = *extra.Infogpus
+		}
+	}
+	if !ok {
+		return "", 0, 0, false
+	}
+	return spec, count, memGiB, true
 }

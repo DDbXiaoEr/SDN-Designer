@@ -57,7 +57,12 @@ func (p *aliyunProvider) Images(_ context.Context, region string) ([]catalog.Ite
 			if img.ImageId == nil {
 				continue
 			}
-			items = append(items, catalog.Item{Value: *img.ImageId, Label: aliyunImageLabel(img.ImageName, img.Description, img.ImageId)})
+			label := aliyunImageLabel(img.ImageName, img.Description, img.ImageId)
+			item := catalog.Item{Value: *img.ImageId, Label: label}
+			if catalog.LooksLikeGPUImage(label, tea.StringValue(img.OSName), tea.StringValue(img.ImageFamily)) {
+				item.GPU = true
+			}
+			items = append(items, item)
 		}
 		if int32(len(set)) < pageSize {
 			break
@@ -101,7 +106,19 @@ func (p *aliyunProvider) InstanceTypes(_ context.Context, region string) ([]cata
 			if it.CpuCoreCount != nil && it.MemorySize != nil {
 				label = fmt.Sprintf("%s (%d vCPU / %g GiB)", id, *it.CpuCoreCount, *it.MemorySize)
 			}
-			items = append(items, catalog.Item{Value: id, Label: label, Zones: zonesByType[id]})
+			item := catalog.Item{Value: id, Label: label, Zones: zonesByType[id]}
+			gpuCount := float64(tea.Int32Value(it.GPUAmount))
+			gpuSpec := tea.StringValue(it.GPUSpec)
+			if gpuCount > 0 || gpuSpec != "" {
+				item.GPU = true
+				item.GPUCount = gpuCount
+				item.GPUSpec = gpuSpec
+				if it.GPUMemorySize != nil {
+					item.GPUMemoryGiB = float64(*it.GPUMemorySize)
+				}
+				item.Label = catalog.GPULabel(label, gpuSpec, gpuCount)
+			}
+			items = append(items, item)
 		}
 		if resp.Body.NextToken == nil || *resp.Body.NextToken == "" {
 			break

@@ -21,6 +21,15 @@ function normalizeItems(items) {
       if (Array.isArray(it.zones) && it.zones.length) {
         item.zones = it.zones.map((z) => String(z))
       }
+      // GPU 规格/镜像：在线清单标记后可按 gpu 过滤
+      if (it.gpu) {
+        item.gpu = true
+        if (it.gpuSpec) item.gpuSpec = String(it.gpuSpec)
+        const count = Number(it.gpuCount)
+        if (count > 0) item.gpuCount = count
+        const mem = Number(it.gpuMemoryGiB)
+        if (mem > 0) item.gpuMemoryGiB = mem
+      }
       return item
     })
     .filter(Boolean)
@@ -91,14 +100,39 @@ export function instanceTypeZones(vendor, type) {
   return item && Array.isArray(item.zones) ? item.zones : []
 }
 
-export function defaultImage(vendor) {
-  const list = imageOptions(vendor)
+export function gpuImageOptions(vendor) {
+  return imageOptions(vendor).filter((o) => o.gpu)
+}
+
+export function gpuInstanceTypeOptions(vendor) {
+  return instanceTypeOptions(vendor).filter((o) => o.gpu)
+}
+
+// 部署 GPU 时用 GPU 清单，否则排除 GPU 项；对应清单为空时回退全量，避免下拉空白
+export function instanceImageOptions(vendor, gpu) {
+  const all = imageOptions(vendor)
+  const list = gpu ? all.filter((o) => o.gpu) : all.filter((o) => !o.gpu)
+  return list.length ? list : all
+}
+
+export function instanceTypeCatalog(vendor, gpu) {
+  const all = instanceTypeOptions(vendor)
+  const list = gpu ? all.filter((o) => o.gpu) : all.filter((o) => !o.gpu)
+  return list.length ? list : all
+}
+
+export function defaultImage(vendor, gpu) {
+  const list = instanceImageOptions(vendor, gpu)
   return list[0] ? list[0].value : ''
 }
 
-export function defaultInstanceType(vendor) {
-  const list = instanceTypeOptions(vendor)
+export function defaultInstanceType(vendor, gpu) {
+  const list = instanceTypeCatalog(vendor, gpu)
   return list[0] ? list[0].value : ''
+}
+
+export function instanceTypeInfo(vendor, type) {
+  return instanceTypeOptions(vendor).find((o) => o.value === type) || null
 }
 
 async function fetchJson(url) {

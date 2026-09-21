@@ -62,7 +62,12 @@ func (p *tencentProvider) Images(ctx context.Context, region string) ([]catalog.
 			if img.ImageId == nil {
 				continue
 			}
-			items = append(items, catalog.Item{Value: *img.ImageId, Label: tencentImageLabel(img)})
+			label := tencentImageLabel(img)
+			item := catalog.Item{Value: *img.ImageId, Label: label}
+			if catalog.LooksLikeGPUImage(label, stringValue(img.OsName), stringValue(img.Platform), stringValue(img.ImageFamily)) {
+				item.GPU = true
+			}
+			items = append(items, item)
 		}
 		if len(set) < limit {
 			break
@@ -85,6 +90,8 @@ func (p *tencentProvider) InstanceTypes(ctx context.Context, region string) ([]c
 
 	type agg struct {
 		cpu, mem int64
+		gpu      int64
+		gpuCount float64
 		zones    map[string]struct{}
 	}
 	byType := map[string]*agg{}
@@ -105,6 +112,12 @@ func (p *tencentProvider) InstanceTypes(ctx context.Context, region string) ([]c
 			if it.Memory != nil {
 				a.mem = *it.Memory
 			}
+			if it.Gpu != nil {
+				a.gpu = *it.Gpu
+			}
+			if it.GpuCount != nil {
+				a.gpuCount = *it.GpuCount
+			}
 			byType[*it.InstanceType] = a
 		}
 		if it.Zone != nil {
@@ -123,7 +136,18 @@ func (p *tencentProvider) InstanceTypes(ctx context.Context, region string) ([]c
 		if a.cpu > 0 || a.mem > 0 {
 			label = fmt.Sprintf("%s (%d vCPU / %d GiB)", typ, a.cpu, a.mem)
 		}
-		items = append(items, catalog.Item{Value: typ, Label: label, Zones: zones})
+		item := catalog.Item{Value: typ, Label: label, Zones: zones}
+		// Gpu 为核数、GpuCount 为物理卡数；任一大于 0 即视为 GPU 规格
+		count := a.gpuCount
+		if count <= 0 && a.gpu > 0 {
+			count = float64(a.gpu)
+		}
+		if count > 0 {
+			item.GPU = true
+			item.GPUCount = count
+			item.Label = catalog.GPULabel(label, "", count)
+		}
+		items = append(items, item)
 	}
 	return items, nil
 }

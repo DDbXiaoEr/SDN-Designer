@@ -56,10 +56,14 @@ func (p *awsProvider) Images(ctx context.Context, region string) ([]catalog.Item
 		if img.ImageId == nil {
 			continue
 		}
-		items = append(items, catalog.Item{
-			Value: *img.ImageId,
-			Label: awsLabel(aws.ToString(img.Name), aws.ToString(img.Description), *img.ImageId),
-		})
+		name := aws.ToString(img.Name)
+		desc := aws.ToString(img.Description)
+		label := awsLabel(name, desc, *img.ImageId)
+		item := catalog.Item{Value: *img.ImageId, Label: label}
+		if catalog.LooksLikeGPUImage(name, desc) {
+			item.GPU = true
+		}
+		items = append(items, item)
 	}
 	return items, nil
 }
@@ -77,6 +81,10 @@ func (p *awsProvider) InstanceTypes(ctx context.Context, region string) ([]catal
 
 	type meta struct {
 		cpu, memMiB int32
+		gpu         bool
+		gpuSpec     string
+		gpuCount    float64
+		gpuMemGiB   float64
 	}
 	metas := map[string]meta{}
 	typesPager := ec2.NewDescribeInstanceTypesPaginator(client, &ec2.DescribeInstanceTypesInput{})
@@ -97,6 +105,30 @@ func (p *awsProvider) InstanceTypes(ctx context.Context, region string) ([]catal
 			if it.MemoryInfo != nil && it.MemoryInfo.SizeInMiB != nil {
 				m.memMiB = int32(*it.MemoryInfo.SizeInMiB)
 			}
+			if g := it.GpuInfo; g != nil && len(g.Gpus) > 0 {
+				m.gpu = true
+				var count int32
+				for _, d := range g.Gpus {
+					n := aws.ToInt32(d.Count)
+					count += n
+					if m.gpuSpec == "" {
+						name := aws.ToString(d.Name)
+						manu := aws.ToString(d.Manufacturer)
+						switch {
+						case manu != "" && name != "":
+							m.gpuSpec = manu + " " + name
+						case name != "":
+							m.gpuSpec = name
+						default:
+							m.gpuSpec = manu
+						}
+					}
+				}
+				m.gpuCount = float64(count)
+				if g.TotalGpuMemoryInMiB != nil {
+					m.gpuMemGiB = float64(*g.TotalGpuMemoryInMiB) / 1024
+				}
+			}
 			metas[id] = m
 		}
 	}
@@ -107,7 +139,15 @@ func (p *awsProvider) InstanceTypes(ctx context.Context, region string) ([]catal
 		if m.cpu > 0 || m.memMiB > 0 {
 			label = fmt.Sprintf("%s (%d vCPU / %g GiB)", id, m.cpu, float64(m.memMiB)/1024)
 		}
-		items = append(items, catalog.Item{Value: id, Label: label, Zones: zonesByType[id]})
+		item := catalog.Item{Value: id, Label: label, Zones: zonesByType[id]}
+		if m.gpu {
+			item.GPU = true
+			item.GPUSpec = m.gpuSpec
+			item.GPUCount = m.gpuCount
+			item.GPUMemoryGiB = m.gpuMemGiB
+			item.Label = catalog.GPULabel(label, m.gpuSpec, m.gpuCount)
+		}
+		items = append(items, item)
 	}
 	return items, nil
 }

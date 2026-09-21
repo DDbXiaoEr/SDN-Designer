@@ -7,7 +7,7 @@ import { outputOptions } from '../data/outputs.js'
 import { nodeLabelKey } from '../data/vendors.js'
 import { vendor } from '../store/vendor.js'
 import { useDesigner } from '../store/designer.js'
-import { instanceTypeZones } from '../store/catalog.js'
+import { instanceTypeZones, instanceTypeInfo, defaultImage, defaultInstanceType, instanceImageOptions, instanceTypeCatalog } from '../store/catalog.js'
 import { resolveZone, validateInstanceZones, createCloudContext, lbBackendCandidates, lbHealthCheck, instanceCount, eipInstanceCandidates, eipBindings } from '../export/terraform/common.js'
 import TransferBox from './TransferBox.vue'
 
@@ -298,7 +298,7 @@ function patch(key, value) {
 }
 
 function optionsFor(f) {
-  const opts = typeof f.options === 'function' ? f.options(vendor.value) : f.options || []
+  const opts = typeof f.options === 'function' ? f.options(vendor.value, node.value.data) : f.options || []
   // 已连接密钥对节点时登录方式只能是密钥登录
   if (f.key === 'loginType' && hasKeyPairNode.value) {
     return opts.filter((o) => o.value === 'keyPair')
@@ -315,7 +315,46 @@ const CUSTOM = '__custom__'
 const customMode = ref({})
 
 function comboOptions(f) {
-  return typeof f.options === 'function' ? f.options(vendor.value) : f.options || []
+  return typeof f.options === 'function' ? f.options(vendor.value, node.value.data) : f.options || []
+}
+
+const GPU_DRIVERS = [
+  { value: 'none', label: 'inspector.gpuDriverNone' },
+  { value: 'nvidia', label: 'inspector.gpuDriverNvidia' },
+]
+
+const gpuTypeInfo = computed(() => {
+  if (!node.value || node.value.type !== 'Instance' || !node.value.data.gpu) return null
+  return instanceTypeInfo(vendor.value, node.value.data.instanceType)
+})
+
+function gpuPatch(key, value) {
+  patch(key, value)
+}
+
+// 切换 GPU：规格/镜像切到对应清单（当前值不在新清单中则换默认）
+function onGpuChange(checked) {
+  if (!node.value) return
+  const next = { gpu: checked }
+  if (!checked) {
+    next.gpuDriver = 'none'
+    next.gpuDriverVersion = ''
+  } else if (!node.value.data.gpuDriver) {
+    next.gpuDriver = 'none'
+  }
+  const images = instanceImageOptions(vendor.value, checked)
+  const types = instanceTypeCatalog(vendor.value, checked)
+  if (!images.some((o) => o.value === node.value.data.imageId)) {
+    next.imageId = defaultImage(vendor.value, checked)
+  }
+  if (!types.some((o) => o.value === node.value.data.instanceType)) {
+    next.instanceType = defaultInstanceType(vendor.value, checked)
+  }
+  const mode = { ...customMode.value }
+  delete mode.imageId
+  delete mode.instanceType
+  customMode.value = mode
+  updateNodeData(node.value.id, next)
 }
 
 // 当前值不在候选列表中，或用户显式选择了「自定义」
@@ -471,7 +510,7 @@ function toggleOutput(key, checked) {
             v-else-if="f.type === 'checkbox'"
             type="checkbox"
             :checked="node.data[f.key]"
-            @change="f.key === 'controller' ? patchController($event.target.checked) : patch(f.key, $event.target.checked)"
+            @change="f.key === 'controller' ? patchController($event.target.checked) : f.key === 'gpu' ? onGpuChange($event.target.checked) : patch(f.key, $event.target.checked)"
           />
           <input
             v-else-if="f.type === 'number'"
@@ -498,6 +537,39 @@ function toggleOutput(key, checked) {
         <p v-if="node.type === 'Instance' && hasKeyPairNode" class="section-hint">
           {{ t('inspector.keyPairFromNodeHint', { name: linkedKeyPair.data.name }) }}
         </p>
+
+        <div v-if="node.type === 'Instance' && node.data.gpu" class="section">
+          <div class="section-title">{{ t('inspector.gpuTitle') }}</div>
+          <p class="section-hint">{{ t('inspector.gpuHint') }}</p>
+          <div class="rule gpu-grid">
+            <label class="hc-field">
+              {{ t('inspector.gpuSpec') }}
+              <input :value="gpuTypeInfo && gpuTypeInfo.gpuSpec ? gpuTypeInfo.gpuSpec : t('inspector.gpuSpecUnknown')" readonly />
+            </label>
+            <label class="hc-field">
+              {{ t('inspector.gpuCount') }}
+              <input :value="gpuTypeInfo && gpuTypeInfo.gpuCount ? gpuTypeInfo.gpuCount : '—'" readonly />
+            </label>
+            <label v-if="gpuTypeInfo && gpuTypeInfo.gpuMemoryGiB" class="hc-field">
+              {{ t('inspector.gpuMemory') }}
+              <input :value="`${gpuTypeInfo.gpuMemoryGiB} GiB`" readonly />
+            </label>
+            <label class="hc-field">
+              {{ t('inspector.gpuDriver') }}
+              <select :value="node.data.gpuDriver || 'none'" @change="gpuPatch('gpuDriver', $event.target.value)">
+                <option v-for="o in GPU_DRIVERS" :key="o.value" :value="o.value">{{ t(o.label) }}</option>
+              </select>
+            </label>
+            <label v-if="node.data.gpuDriver === 'nvidia'" class="hc-field wide">
+              {{ t('inspector.gpuDriverVersion') }}
+              <input
+                :placeholder="t('inspector.gpuDriverVersionPlaceholder')"
+                :value="node.data.gpuDriverVersion || ''"
+                @input="gpuPatch('gpuDriverVersion', $event.target.value)"
+              />
+            </label>
+          </div>
+        </div>
 
         <div v-if="instanceZoneCheck" class="section stock">
           <div class="section-title">{{ t('inspector.instanceZoneTitle') }}</div>
@@ -1086,6 +1158,11 @@ function toggleOutput(key, checked) {
 }
 .hc-field.wide {
   grid-column: 1 / -1;
+}
+.gpu-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
 }
 .nic-tunnel {
   display: flex;

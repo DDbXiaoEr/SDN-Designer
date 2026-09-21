@@ -4,7 +4,12 @@
 import { defaultRegion, defaultZone, regionOptions } from './regions.js'
 import { chargeTypeOptions, defaultChargeType } from './chargeTypes.js'
 import { defaultDiskType } from './disks.js'
-import { imageOptions, defaultImage, instanceTypeOptions, defaultInstanceType } from '../store/catalog.js'
+import {
+  instanceImageOptions,
+  instanceTypeCatalog,
+  defaultImage,
+  defaultInstanceType,
+} from '../store/catalog.js'
 
 export const CATEGORIES = {
   ovn: { label: 'categories.ovn', color: 'var(--ovn)' },
@@ -227,14 +232,29 @@ export const NODE_TYPES = {
       loginType: 'keyPair',
       keyPair: '',
       password: '',
+      // 部署 GPU 实例：规格/镜像切到 GPU 清单，并可配置驱动安装
+      gpu: false,
+      gpuDriver: 'none',
+      gpuDriverVersion: '',
       systemDisk: { type: defaultDiskType(vendor), size: 40 },
       dataDisks: [],
     }),
     fields: [
       { key: 'name', label: 'fields.name', type: 'text' },
       { key: 'count', label: 'fields.count', type: 'number' },
-      { key: 'imageId', label: 'fields.imageId', type: 'combo', options: (vendor) => imageOptions(vendor) },
-      { key: 'instanceType', label: 'fields.instanceType', type: 'combo', options: (vendor) => instanceTypeOptions(vendor) },
+      { key: 'gpu', label: 'fields.gpu', type: 'checkbox' },
+      {
+        key: 'imageId',
+        label: 'fields.imageId',
+        type: 'combo',
+        options: (vendor, data) => instanceImageOptions(vendor, !!(data && data.gpu)),
+      },
+      {
+        key: 'instanceType',
+        label: 'fields.instanceType',
+        type: 'combo',
+        options: (vendor, data) => instanceTypeCatalog(vendor, !!(data && data.gpu)),
+      },
       {
         key: 'chargeType',
         label: 'fields.chargeType',
@@ -264,6 +284,7 @@ export const NODE_TYPES = {
         ['summary.disk', dataCount ? `${sys} + ${dataCount}` : String(sys)],
       ]
       if (Number(d.count) > 1) rows.push(['summary.count', String(Math.floor(Number(d.count)))])
+      if (d.gpu) rows.push(['summary.gpu', 'GPU'])
       return rows
     },
   },

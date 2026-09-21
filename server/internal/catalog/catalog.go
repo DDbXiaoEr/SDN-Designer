@@ -4,6 +4,7 @@ package catalog
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log"
 	"net/http"
 	"sort"
@@ -18,10 +19,15 @@ import (
 var ErrUnsupported = errors.New("catalog: unsupported vendor")
 
 // Item 归一化后的清单项；zones 为该规格有货的可用区（完整 AZ ID），缺省表示不限制。
+// GPU 相关字段仅 GPU 规格/镜像填写：gpu 为 true 表示该项可用于 GPU 实例。
 type Item struct {
-	Value string   `json:"value"`
-	Label string   `json:"label"`
-	Zones []string `json:"zones,omitempty"`
+	Value        string   `json:"value"`
+	Label        string   `json:"label"`
+	Zones        []string `json:"zones,omitempty"`
+	GPU          bool     `json:"gpu,omitempty"`
+	GPUSpec      string   `json:"gpuSpec,omitempty"`      // GPU 型号，如 NVIDIA V100
+	GPUCount     float64  `json:"gpuCount,omitempty"`     // GPU 卡数（vGPU 可小于 1）
+	GPUMemoryGiB float64  `json:"gpuMemoryGiB,omitempty"` // 单卡显存 GiB
 }
 
 // Provider 一个云厂商的清单来源。
@@ -73,7 +79,7 @@ func NewHandler(providers map[string]Provider, ttl time.Duration) *Handler {
 // Register 挂载路由：
 //
 //	GET /api/vendors
-//	GET /api/:kind/:vendor            (kind = images | instanceTypes)
+//	GET /api/:kind/:vendor            (kind = images | instanceTypes | gpuImages | gpuInstanceTypes)
 //	GET /api/:kind/:vendor/:region
 func (h *Handler) Register(r gin.IRouter) {
 	g := r.Group("/api")
@@ -90,7 +96,7 @@ func (h *Handler) listVendors(c *gin.Context) {
 	sort.Strings(names)
 	c.JSON(http.StatusOK, gin.H{
 		"vendors": names,
-		"kinds":   []string{"images", "instanceTypes"},
+		"kinds":   []string{"images", "instanceTypes", "gpuImages", "gpuInstanceTypes"},
 	})
 }
 
@@ -105,7 +111,8 @@ func (h *Handler) get(c *gin.Context) {
 		region = DefaultRegion(vendor)
 	}
 
-	if kind != "images" && kind != "instanceTypes" {
+	baseKind, gpuOnly, ok := ParseKind(kind)
+	if !ok {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "unsupported kind: " + kind})
 		return
 	}
@@ -119,7 +126,7 @@ func (h *Handler) get(c *gin.Context) {
 		return
 	}
 
-	items, err := h.load(c.Request.Context(), vendor, kind, region, provider)
+	items, err := h.load(c.Request.Context(), vendor, baseKind, region, provider)
 	if err != nil {
 		// 打印上游云厂商的原始响应（SDK 错误通常会带上响应体），便于定位签名/权限/参数问题
 		log.Printf("[catalog] %s/%s region=%s upstream error: %v", vendor, kind, region, err)
@@ -130,6 +137,9 @@ func (h *Handler) get(c *gin.Context) {
 			"region": region,
 		})
 		return
+	}
+	if gpuOnly {
+		items = FilterGPU(items)
 	}
 	c.JSON(http.StatusOK, gin.H{
 		"vendor": vendor,
@@ -187,10 +197,12 @@ func Normalize(items []Item) []Item {
 		}
 		it.Value = value
 		it.Label = label
+		it.GPUSpec = strings.TrimSpace(it.GPUSpec)
 		it.Zones = Dedupe(it.Zones)
 
 		if i, ok := index[value]; ok {
 			out[i].Zones = Dedupe(append(out[i].Zones, it.Zones...))
+			mergeGPU(&out[i], it)
 			continue
 		}
 		index[value] = len(out)
@@ -220,4 +232,63 @@ func Dedupe(in []string) []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+// ParseKind 解析清单类型：gpuImages / gpuInstanceTypes 分别对应镜像/规格的 GPU 子集。
+func ParseKind(kind string) (baseKind string, gpuOnly bool, ok bool) {
+	switch kind {
+	case "images", "instanceTypes":
+		return kind, false, true
+	case "gpuImages":
+		return "images", true, true
+	case "gpuInstanceTypes":
+		return "instanceTypes", true, true
+	default:
+		return "", false, false
+	}
+}
+
+// FilterGPU 只保留带 GPU 标记的项。
+func FilterGPU(items []Item) []Item {
+	out := make([]Item, 0, len(items))
+	for _, it := range items {
+		if it.GPU {
+			out = append(out, it)
+		}
+	}
+	return out
+}
+
+// GPULabel 在规格标签上追加 GPU 型号与卡数，便于下拉识别。
+func GPULabel(base, spec string, count float64) string {
+	if spec == "" && count <= 0 {
+		return base
+	}
+	parts := make([]string, 0, 2)
+	if count > 0 {
+		if count == float64(int(count)) {
+			parts = append(parts, fmt.Sprintf("%dx", int(count)))
+		} else {
+			parts = append(parts, fmt.Sprintf("%gx", count))
+		}
+	}
+	if spec != "" {
+		parts = append(parts, spec)
+	}
+	return base + " [" + strings.Join(parts, " ") + "]"
+}
+
+func mergeGPU(dst *Item, src Item) {
+	if src.GPU {
+		dst.GPU = true
+	}
+	if dst.GPUSpec == "" {
+		dst.GPUSpec = src.GPUSpec
+	}
+	if src.GPUCount > dst.GPUCount {
+		dst.GPUCount = src.GPUCount
+	}
+	if src.GPUMemoryGiB > dst.GPUMemoryGiB {
+		dst.GPUMemoryGiB = src.GPUMemoryGiB
+	}
 }

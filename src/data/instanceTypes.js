@@ -11,6 +11,7 @@ export const LOCAL_INSTANCE_TYPES = {
     { value: 'ecs.r6.large', label: 'ecs.r6.large (2 vCPU / 16 GiB)' },
     { value: 'ecs.u1-c1m2.large', label: 'ecs.u1-c1m2.large (2 vCPU / 4 GiB)' },
     { value: 'ecs.e-c1m1.large', label: 'ecs.e-c1m1.large (2 vCPU / 2 GiB)' },
+    { value: 'ecs.gn6i-c4g1.xlarge', label: 'ecs.gn6i-c4g1.xlarge (4 vCPU / 15 GiB) [1x NVIDIA T4]', gpu: true, gpuSpec: 'NVIDIA T4', gpuCount: 1 },
   ],
   tencent: [
     { value: 'S5.SMALL1', label: 'S5.SMALL1 (1 vCPU / 1 GiB)' },
@@ -22,6 +23,7 @@ export const LOCAL_INSTANCE_TYPES = {
     { value: 'SA3.MEDIUM4', label: 'SA3.MEDIUM4 (2 vCPU / 4 GiB)', zones: ['ap-guangzhou-5', 'ap-guangzhou-6', 'ap-guangzhou-7'] },
     { value: 'SA3.LARGE8', label: 'SA3.LARGE8 (2 vCPU / 8 GiB)', zones: ['ap-guangzhou-5', 'ap-guangzhou-6', 'ap-guangzhou-7'] },
     { value: 'SA3.2LARGE8', label: 'SA3.2LARGE8 (4 vCPU / 8 GiB)' },
+    { value: 'GN7.2XLARGE32', label: 'GN7.2XLARGE32 (8 vCPU / 32 GiB) [1x NVIDIA T4]', gpu: true, gpuSpec: 'NVIDIA T4', gpuCount: 1 },
   ],
   aws: [
     { value: 't3.micro', label: 't3.micro (2 vCPU / 1 GiB)' },
@@ -32,6 +34,7 @@ export const LOCAL_INSTANCE_TYPES = {
     { value: 'c5.large', label: 'c5.large (2 vCPU / 4 GiB)' },
     { value: 'c5.xlarge', label: 'c5.xlarge (4 vCPU / 8 GiB)' },
     { value: 'r5.large', label: 'r5.large (2 vCPU / 16 GiB)' },
+    { value: 'g4dn.xlarge', label: 'g4dn.xlarge (4 vCPU / 16 GiB) [1x NVIDIA T4]', gpu: true, gpuSpec: 'NVIDIA T4', gpuCount: 1 },
   ],
   huawei: [
     { value: 's6.small.1', label: 's6.small.1 (1 vCPU / 1 GiB)' },
@@ -42,6 +45,7 @@ export const LOCAL_INSTANCE_TYPES = {
     { value: 'c6.xlarge.2', label: 'c6.xlarge.2 (4 vCPU / 8 GiB)' },
     { value: 'm6.large.8', label: 'm6.large.8 (2 vCPU / 16 GiB)' },
     { value: 'm6.xlarge.8', label: 'm6.xlarge.8 (4 vCPU / 32 GiB)' },
+    { value: 'g6.2xlarge.8', label: 'g6.2xlarge.8 (8 vCPU / 32 GiB) [1x NVIDIA T4]', gpu: true, gpuSpec: 'NVIDIA T4', gpuCount: 1 },
   ],
 }
 
