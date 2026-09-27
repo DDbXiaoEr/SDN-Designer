@@ -112,11 +112,11 @@ go build -o server . && ./server
 在项目根目录 `.env` 中配置（`{kind}` 会被替换为 `images` / `instanceTypes`；GPU 子集可用 `gpuImages` / `gpuInstanceTypes`）：
 
 ```
-VITE_CATALOG_API_URL=http://localhost:8080/api/{kind}/{vendor}
+VITE_CATALOG_API_URL=http://localhost:8080/api/{kind}/{vendor}/{region}
 VITE_PROVIDER_VERSIONS_URL=http://localhost:8080/api/providerVersions/{vendor}
 ```
 
-未指定地域时使用厂商默认地域；要按 VPC 地域拉取，前端需在模板中加入 `{region}`（后续接入）。
+建议带上 `{region}`，按画布 VPC 地域拉取规格；该地域不可用或无货的规格不会出现在编辑器下拉中。未指定地域时使用厂商默认地域。
 `VITE_PROVIDER_VERSIONS_URL` 用于工具栏「Provider 版本」下拉的候选（`{vendor}` 占位符可选）；
 下拉始终列出全部版本并支持搜索，选中后生成 `~> 主.次` 约束（仍可手动输入任意约束）。
 

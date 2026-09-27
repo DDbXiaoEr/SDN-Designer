@@ -90,10 +90,10 @@ npm run preview # 预览生产构建
 
 1. 复制 [`.env.example`](./.env.example) 为 `.env`，设置 `VITE_CATALOG_API_URL`（`VITE_` 前缀变量在构建时注入）。
 2. 代理地址支持两种模式（实现见 `src/store/catalog.js` 的 `loadFromApi`）：
-   - **按需请求**：URL 含 `{vendor}` / `{kind}` 占位符时，会对 4 个厂商（`aliyun` / `tencent` / `aws` / `huawei`）× 2 种类型（`images` / `instanceTypes`）分别发起请求（GPU 子集可用 `gpuImages` / `gpuInstanceTypes`），例如：
-     ```bash
-     VITE_CATALOG_API_URL=https://catalog.example.com/api/{kind}/{vendor}
-     ```
+    - **按需请求**：URL 含 `{vendor}` / `{kind}` 占位符时，会对 4 个厂商（`aliyun` / `tencent` / `aws` / `huawei`）× 2 种类型（`images` / `instanceTypes`）分别发起请求（GPU 子集可用 `gpuImages` / `gpuInstanceTypes`）。建议再加 `{region}` 按 VPC 地域拉取规格（该地域不可用/无货的规格不进下拉），例如：
+      ```bash
+      VITE_CATALOG_API_URL=https://catalog.example.com/api/{kind}/{vendor}/{region}
+      ```
    - **完整清单**：URL 不含占位符时，视为一次返回 `{ "images": { "<vendor>": [...] }, "instanceTypes": { ... } }`。
 3. 每个清单项可以是字符串，或 `{ value, label }`（也兼容 `{ id, name }`）；响应可直接返回数组，或包在 `{ "items": [...] }` / `{ "values": [...] }` 中。GPU 项可带 `gpu` / `gpuSpec` / `gpuCount` / `gpuMemoryGiB`。
 

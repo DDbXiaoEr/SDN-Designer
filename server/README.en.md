@@ -123,12 +123,13 @@ Configure in the project root's `.env` (`{kind}` is replaced with `images` / `in
 GPU subsets are available as `gpuImages` / `gpuInstanceTypes`):
 
 ```
-VITE_CATALOG_API_URL=http://localhost:8080/api/{kind}/{vendor}
+VITE_CATALOG_API_URL=http://localhost:8080/api/{kind}/{vendor}/{region}
 VITE_PROVIDER_VERSIONS_URL=http://localhost:8080/api/providerVersions/{vendor}
 ```
 
-If no region is specified, the vendor's default region is used; to fetch by VPC region the
-frontend needs to include `{region}` in the template (to be wired up later).
+Include `{region}` so instance types are fetched for the VPC region on the canvas; types that
+are unavailable or out of stock in that region are omitted from the editor dropdown. If no
+region is specified, the vendor's default region is used.
 `VITE_PROVIDER_VERSIONS_URL` provides the candidates for the "Provider version" dropdown in the
 toolbar (the `{vendor}` placeholder is optional); the dropdown always lists all versions with
 search support, and selecting one generates a `~> major.minor` constraint (any constraint can

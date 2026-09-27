@@ -253,7 +253,7 @@ export const NODE_TYPES = {
         key: 'instanceType',
         label: 'fields.instanceType',
         type: 'combo',
-        options: (vendor, data) => instanceTypeCatalog(vendor, !!(data && data.gpu)),
+        options: (vendor, data, region) => instanceTypeCatalog(vendor, !!(data && data.gpu), region),
       },
       {
         key: 'chargeType',

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strconv"
+	"strings"
 
 	"ovndesigner/server/internal/catalog"
 	"ovndesigner/server/internal/config"
@@ -95,11 +96,16 @@ func (p *huaweiProvider) InstanceTypes(_ context.Context, region string) ([]cata
 		if value == "" {
 			continue
 		}
+		zones, offered := huaweiFlavorAvailability(region, f.OsExtraSpecs)
+		// 当前地域下线或售罄的规格不进清单
+		if !offered {
+			continue
+		}
 		label := value
 		if f.Vcpus != "" || f.Ram > 0 {
 			label = fmt.Sprintf("%s (%s vCPU / %g GiB)", value, f.Vcpus, float64(f.Ram)/1024)
 		}
-		item := catalog.Item{Value: value, Label: label}
+		item := catalog.Item{Value: value, Label: label, Zones: zones}
 		if spec, count, memGiB, ok := huaweiGPU(f.OsExtraSpecs); ok {
 			item.GPU = true
 			item.GPUSpec = spec
@@ -110,6 +116,74 @@ func (p *huaweiProvider) InstanceTypes(_ context.Context, region string) ([]cata
 		items = append(items, item)
 	}
 	return items, nil
+}
+
+func huaweiStatusOffered(status string) bool {
+	switch strings.ToLower(strings.TrimSpace(status)) {
+	case "abandon", "sellout":
+		return false
+	default:
+		return true
+	}
+}
+
+// huaweiFlavorAvailability 根据 cond:operation:status / cond:operation:az 判断本地域是否可售。
+// 可映射的可用区写入 zones；无法解析 AZ 短名时仅用地域级状态。
+func huaweiFlavorAvailability(region string, extra *ecsmodel.FlavorExtraSpec) (zones []string, offered bool) {
+	status := "normal"
+	if extra != nil && extra.Condoperationstatus != nil && *extra.Condoperationstatus != "" {
+		status = *extra.Condoperationstatus
+	}
+	offered = huaweiStatusOffered(status)
+	if extra == nil || extra.Condoperationaz == nil {
+		return nil, offered
+	}
+	raw := strings.TrimSpace(*extra.Condoperationaz)
+	if raw == "" {
+		return nil, offered
+	}
+	sawOfferedAz := false
+	for _, part := range strings.Split(raw, ",") {
+		part = strings.TrimSpace(part)
+		open := strings.LastIndex(part, "(")
+		close := strings.LastIndex(part, ")")
+		if open <= 0 || close <= open {
+			continue
+		}
+		az := strings.TrimSpace(part[:open])
+		st := strings.TrimSpace(part[open+1 : close])
+		if !huaweiStatusOffered(st) {
+			continue
+		}
+		sawOfferedAz = true
+		id := huaweiZoneID(region, az)
+		if id == "" {
+			continue
+		}
+		zones = append(zones, id)
+	}
+	if len(zones) > 0 {
+		return zones, true
+	}
+	// AZ 短名无法映射时，只要有可售 AZ 仍保留该规格
+	if sawOfferedAz {
+		return nil, true
+	}
+	return nil, offered
+}
+
+func huaweiZoneID(region, az string) string {
+	az = strings.TrimSpace(az)
+	if az == "" {
+		return ""
+	}
+	if strings.HasPrefix(az, region) {
+		return az
+	}
+	if len(az) == 1 && az[0] >= 'a' && az[0] <= 'z' {
+		return region + az
+	}
+	return ""
 }
 
 // huaweiGPU 从规格 extra_specs 提取 GPU 信息。

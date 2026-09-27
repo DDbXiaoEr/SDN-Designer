@@ -102,11 +102,16 @@ func (p *aliyunProvider) InstanceTypes(_ context.Context, region string) ([]cata
 				continue
 			}
 			id := *it.InstanceTypeId
+			zones := zonesByType[id]
+			// 拿到库存数据后，当前地域无货的规格不进清单
+			if len(zonesByType) > 0 && len(zones) == 0 {
+				continue
+			}
 			label := id
 			if it.CpuCoreCount != nil && it.MemorySize != nil {
 				label = fmt.Sprintf("%s (%d vCPU / %g GiB)", id, *it.CpuCoreCount, *it.MemorySize)
 			}
-			item := catalog.Item{Value: id, Label: label, Zones: zonesByType[id]}
+			item := catalog.Item{Value: id, Label: label, Zones: zones}
 			gpuCount := float64(tea.Int32Value(it.GPUAmount))
 			gpuSpec := tea.StringValue(it.GPUSpec)
 			if gpuCount > 0 || gpuSpec != "" {

@@ -219,16 +219,17 @@ OVN-Designer/
   选中后显示文本框手输；当前值不在候选列表时自动进入自定义），清单来自 `store/catalog.js`：
   以 `images.js` / `instanceTypes.js` 的本地内置清单为基底，按 `value` 合并在线清单（同项在线覆盖）。
   在线来源通过构建时环境变量注入：`VITE_CATALOG_URL`（远程 JSON）优先，其次 `VITE_CATALOG_API_URL`
-  （厂商 API 代理，支持 `{vendor}` / `{kind}` 占位符），配置见 `.env.example`；拉取失败时自动回退本地。
+  （厂商 API 代理，支持 `{vendor}` / `{kind}` / `{region}` 占位符），配置见 `.env.example`；拉取失败时自动回退本地。
   代理服务见 `server/`（Go + Gin）：`GET /api/:kind/:vendor[/:region]` 用厂商 AK/SK 签名调用
-  `DescribeImages` / `DescribeInstanceTypes`（腾讯云另有可用区库存 `zones`）；
+  `DescribeImages` / `DescribeInstanceTypes`（腾讯云另有可用区库存 `zones`；阿里云/AWS/华为云会丢掉当前地域无货规格）；
   `kind` 还可为 `gpuImages` / `gpuInstanceTypes`，从全量清单中过滤 GPU 规格与相关镜像
   （项上带 `gpu` / `gpuSpec` / `gpuCount` / `gpuMemoryGiB`），未配置密钥的厂商返回 501；
   密钥等配置在 `server/config.yaml`（YAML，环境变量可覆盖），`server/config.example.yaml` 为示例，
   `mock: true` 可无凭证联调。
 - 规格条目可带 `zones`（该规格有货的完整可用区 ID 列表，缺省表示不限制），`catalog.js` 归一化时保留，
-  并导出 `instanceTypeZones(vendor, type)`；本地 `instanceTypes.js` 仅对腾讯云 SA3 系列标注
-  `ap-guangzhou-5/6/7` 作为示例，真实库存由在线清单提供。
+  并导出 `instanceTypeZones(vendor, type, region)`；`instanceTypeCatalog(vendor, gpu, region)` 会去掉
+  当前 VPC 地域不可用/无货的规格（不进编辑器下拉）。URL 含 `{region}` 时按画布 VPC 地域拉取并缓存。
+  本地 `instanceTypes.js` 仅对腾讯云 SA3 系列标注 `ap-guangzhou-5/6/7` 作为示例，真实库存由在线清单提供。
 - 腾讯云 CVM 必须与子网同可用区，故「库存」约束作用在 `Subnet.zone`（部署可用区）上，
   判定统一由 `common.js` 的 `validateInstanceZones(nodes, edges, vendor, zonesOf)` 提供（返回项含 `subnetId`、`sameRegion`）：
   - 连线 `Subnet → Instance` 时，`App.vue` 的 `onConnect` 立即校验并弹出轻量提示（`toast`），

@@ -90,10 +90,10 @@ A Go + Gin proxy is bundled in this repo, see [`server/`](./server/README.en.md)
 
 1. Copy [`.env.example`](./.env.example) to `.env` and set `VITE_CATALOG_API_URL` (variables prefixed with `VITE_` are injected at build time).
 2. The proxy URL supports two modes (see `loadFromApi` in `src/store/catalog.js`):
-    - **Per-request**: if the URL contains `{vendor}` / `{kind}` placeholders, it requests each of the 4 vendors (`aliyun` / `tencent` / `aws` / `huawei`) × 2 kinds (`images` / `instanceTypes`) separately (GPU subsets: `gpuImages` / `gpuInstanceTypes`), e.g.:
-     ```bash
-     VITE_CATALOG_API_URL=https://catalog.example.com/api/{kind}/{vendor}
-     ```
+    - **Per-request**: if the URL contains `{vendor}` / `{kind}` placeholders, it requests each of the 4 vendors (`aliyun` / `tencent` / `aws` / `huawei`) × 2 kinds (`images` / `instanceTypes`) separately (GPU subsets: `gpuImages` / `gpuInstanceTypes`). Include `{region}` to fetch instance types for the VPC region (types unavailable or out of stock there are omitted from the dropdown), e.g.:
+      ```bash
+      VITE_CATALOG_API_URL=https://catalog.example.com/api/{kind}/{vendor}/{region}
+      ```
    - **Full catalog**: if the URL has no placeholders, it expects a single response with the shape `{ "images": { "<vendor>": [...] }, "instanceTypes": { ... } }`.
 3. Each catalog item can be a string, or `{ value, label }` (also accepts `{ id, name }`); the response can be a plain array or wrapped in `{ "items": [...] }` / `{ "values": [...] }`. GPU items may include `gpu` / `gpuSpec` / `gpuCount` / `gpuMemoryGiB`.
 

@@ -135,11 +135,16 @@ func (p *awsProvider) InstanceTypes(ctx context.Context, region string) ([]catal
 
 	items := make([]catalog.Item, 0, len(metas))
 	for id, m := range metas {
+		zones := zonesByType[id]
+		// 拿到库存数据后，当前地域无货的规格不进清单
+		if len(zonesByType) > 0 && len(zones) == 0 {
+			continue
+		}
 		label := id
 		if m.cpu > 0 || m.memMiB > 0 {
 			label = fmt.Sprintf("%s (%d vCPU / %g GiB)", id, m.cpu, float64(m.memMiB)/1024)
 		}
-		item := catalog.Item{Value: id, Label: label, Zones: zonesByType[id]}
+		item := catalog.Item{Value: id, Label: label, Zones: zones}
 		if m.gpu {
 			item.GPU = true
 			item.GPUSpec = m.gpuSpec
