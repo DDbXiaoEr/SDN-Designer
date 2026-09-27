@@ -104,31 +104,35 @@ function confirm() {
 .overlay {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.6);
+  background: var(--overlay);
   display: flex;
   align-items: center;
   justify-content: center;
   z-index: 100;
+  backdrop-filter: blur(2px);
 }
 .modal {
-  width: min(460px, 90vw);
-  max-height: 80vh;
-  background: var(--panel);
-  border: 1px solid var(--border);
-  border-radius: 12px;
+  width: min(480px, 92vw);
+  max-height: 82vh;
+  background: var(--surface);
+  border: 1px solid var(--rule-strong);
+  border-radius: var(--radius-lg);
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  box-shadow: var(--shadow-modal);
 }
 .modal-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 14px 16px;
-  border-bottom: 1px solid var(--border);
+  padding: 13px 16px;
+  border-bottom: 1px solid var(--rule);
+  background: var(--surface-2);
 }
 .modal-title {
   font-weight: 700;
+  font-size: 14px;
 }
 .modal-body {
   padding: 16px;
@@ -138,8 +142,9 @@ function confirm() {
   display: flex;
   justify-content: flex-end;
   gap: 8px;
-  padding: 14px 16px;
-  border-top: 1px solid var(--border);
+  padding: 13px 16px;
+  border-top: 1px solid var(--rule);
+  background: var(--surface-2);
 }
 .field {
   margin-bottom: 14px;
@@ -147,7 +152,7 @@ function confirm() {
 .field > label {
   display: block;
   font-size: 11px;
-  color: var(--text-dim);
+  color: var(--ink-dim);
   margin-bottom: 6px;
   font-weight: 600;
 }
@@ -155,21 +160,27 @@ input,
 select {
   width: 100%;
   padding: 8px;
-  border-radius: 6px;
-  border: 1px solid var(--border);
-  background: var(--panel-2);
-  color: var(--text);
-  font-size: 13px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--rule-strong);
+  background: var(--surface-2);
+  color: var(--ink);
+  font-size: 12.5px;
+}
+input[type='checkbox'] {
+  width: auto;
+}
+input::placeholder {
+  color: var(--ink-dim);
 }
 .nic {
-  background: var(--panel-2);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 8px;
+  background: var(--surface-2);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  padding: 10px;
   margin-bottom: 8px;
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 8px;
 }
 .nic-row {
   display: flex;
@@ -184,25 +195,29 @@ select {
   align-items: center;
   gap: 6px;
   font-size: 12px;
-  color: var(--text-dim);
-}
-.nic-tunnel input {
-  width: auto;
+  color: var(--ink-dim);
 }
 .nic-tunnel .mini {
   margin-left: auto;
 }
 button {
-  border: 1px solid var(--border);
-  background: var(--panel-2);
-  color: var(--text);
-  border-radius: 6px;
+  border: 1px solid var(--rule-strong);
+  background: var(--surface-2);
+  color: var(--ink);
+  border-radius: var(--radius-sm);
   padding: 7px 14px;
-  font-size: 13px;
+  font-size: 12.5px;
+  font-weight: 600;
+  transition: border-color 0.12s ease, background 0.12s ease, color 0.12s ease;
+}
+button:hover {
+  border-color: var(--ink-2);
 }
 button.close {
-  color: var(--text-dim);
-  padding: 4px 10px;
+  color: var(--ink-dim);
+  border-color: transparent;
+  background: transparent;
+  padding: 5px 8px;
 }
 button.mini {
   padding: 4px 8px;
@@ -210,19 +225,32 @@ button.mini {
 }
 button.danger {
   color: var(--danger);
+  border-color: var(--danger-line);
+}
+button.danger:hover {
+  background: var(--danger);
+  color: #fff;
+  border-color: var(--danger);
 }
 button.add {
   width: 100%;
-  color: var(--accent);
+  color: var(--plot);
+  border-color: var(--plot);
+  background: var(--plot-soft);
 }
 button.ghost {
-  color: var(--text-dim);
+  color: var(--ink-dim);
+  background: transparent;
 }
 button.primary {
-  background: var(--accent);
-  border-color: var(--accent);
-  color: #0f1117;
-  font-weight: 700;
+  background: var(--plot);
+  border-color: var(--plot);
+  color: #fff;
+  font-weight: 600;
+}
+button.primary:hover {
+  background: #17489f;
+  border-color: #17489f;
 }
 .error {
   color: var(--danger);

@@ -112,22 +112,24 @@ function moveLeft() {
 .transfer-panel {
   flex: 1;
   min-width: 0;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background: var(--panel);
+  border: 1px solid var(--rule-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
   overflow: hidden;
 }
 .transfer-title {
-  padding: 4px 8px;
-  font-size: 11px;
-  color: var(--text-dim);
-  border-bottom: 1px solid var(--border);
+  padding: 5px 8px;
+  font-size: 10.5px;
+  font-weight: 600;
+  color: var(--ink-dim);
+  border-bottom: 1px solid var(--rule);
+  background: var(--paper);
 }
 .transfer-list {
   list-style: none;
   margin: 0;
   padding: 4px;
-  max-height: 120px;
+  max-height: 124px;
   overflow-y: auto;
 }
 .transfer-list li {
@@ -143,13 +145,16 @@ function moveLeft() {
 .transfer-list input {
   width: auto;
 }
+.transfer-list input[type='checkbox'] {
+  accent-color: var(--plot);
+}
 .transfer-label {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 .transfer-empty {
-  color: var(--text-dim);
+  color: var(--ink-dim);
   font-size: 11px;
 }
 .transfer-actions {
@@ -161,9 +166,18 @@ function moveLeft() {
 .transfer-actions button {
   width: 30px;
   padding: 4px 0;
+  border: 1px solid var(--rule-strong);
+  background: var(--surface-2);
+  color: var(--ink);
+  border-radius: var(--radius-sm);
+  font-weight: 600;
+}
+.transfer-actions button:hover:not(:disabled) {
+  border-color: var(--plot);
+  color: var(--plot);
 }
 .transfer-actions button:disabled {
-  opacity: 0.4;
+  opacity: 0.45;
   cursor: default;
 }
 </style>

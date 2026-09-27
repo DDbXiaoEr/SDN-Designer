@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { VueFlow, MarkerType } from '@vue-flow/core'
 import { useI18n } from 'vue-i18n'
 import { Background, BackgroundVariant } from '@vue-flow/background'
@@ -13,10 +13,11 @@ import { createDesigner, nextId } from './store/designer.js'
 import { exportOvn } from './export/ovn.js'
 import { exportTerraform } from './export/terraform/index.js'
 import { validateZones, validateInstanceZones, validateGatewaySources, validateLoadBalancers } from './export/terraform/common.js'
-import { instanceTypeZones } from './store/catalog.js'
+import { instanceTypeZones, ensureCatalogRegion } from './store/catalog.js'
 import { download } from './export/utils.js'
 import { serializeDesign, deserializeDesign, loadFromStorage } from './store/persistence.js'
 import { vendor, setVendor, providerVersion } from './store/vendor.js'
+import { theme } from './store/theme.js'
 import Palette from './components/Palette.vue'
 import Toolbar from './components/Toolbar.vue'
 import Inspector from './components/Inspector.vue'
@@ -43,10 +44,26 @@ const editorNodeId = ref(null)
 const pendingDropPosition = ref(null)
 const fileInput = ref(null)
 
+// 画布上用到的 VPC 地域：按地域拉取规格，避免默认地域混入不可用项
+watch(
+  [vendor, () => nodes.value.filter((n) => n.type === 'VPC').map((n) => n.data && n.data.region).filter(Boolean).join('|')],
+  () => {
+    const seen = new Set()
+    for (const n of nodes.value) {
+      if (n.type !== 'VPC') continue
+      const region = n.data && n.data.region
+      if (!region || seen.has(region)) continue
+      seen.add(region)
+      ensureCatalogRegion(vendor.value, region)
+    }
+  },
+  { immediate: true }
+)
+
 // 实例规格可用区库存判定：连线时与导出/子网编辑校验共用同一逻辑
 function stockIssues(edgesArg) {
-  return validateInstanceZones(nodes.value, edgesArg || edges.value, vendor.value, (type) =>
-    instanceTypeZones(vendor.value, type)
+  return validateInstanceZones(nodes.value, edgesArg || edges.value, vendor.value, (type, region) =>
+    instanceTypeZones(vendor.value, type, region)
   )
 }
 
@@ -338,7 +355,7 @@ function showTerraform() {
     nodes.value,
     edges.value,
     vendor.value,
-    (type) => instanceTypeZones(vendor.value, type)
+    (type, region) => instanceTypeZones(vendor.value, type, region)
   ).forEach((issue) => {
     warnings.push(
       issue.sameRegion.length
@@ -378,6 +395,28 @@ function showTerraform() {
 }
 
 const nodesCount = computed(() => nodes.value.length)
+
+// 画布网格与连线颜色随主题变化（连线颜色主要由 CSS 变量驱动，见下方样式）
+const gridColor = computed(() => (theme.value === 'dark' ? '#2b333c' : '#cdd2cf'))
+// 小地图遮罩/节点色随主题，避免浅色遮罩压在深色面板上
+const miniMaskColor = computed(() =>
+  theme.value === 'dark' ? 'rgba(9, 12, 16, 0.72)' : 'rgba(233, 236, 232, 0.72)'
+)
+const miniNodeColor = computed(() => (theme.value === 'dark' ? '#7d8790' : '#c2c8c6'))
+
+const edgeOptions = computed(() => ({
+  animated: false,
+  interactionWidth: 26,
+  style: { strokeWidth: 1.5 },
+  labelStyle: {
+    fontSize: 10.5,
+    fontWeight: 600,
+    fontFamily: `'IBM Plex Mono', ui-monospace, Menlo, monospace`,
+  },
+  labelBgPadding: [7, 3],
+  labelBgBorderRadius: 3,
+  markerEnd: { type: MarkerType.ArrowClosed, width: 18, height: 18 },
+}))
 </script>
 
 <template>
@@ -399,16 +438,7 @@ const nodesCount = computed(() => nodes.value.length)
           :node-types="nodeTypes"
           :snap-to-grid="true"
           :snap-grid="[16, 16]"
-          :default-edge-options="{
-            animated: false,
-            interactionWidth: 26,
-            style: { stroke: '#4f8cff', strokeWidth: 2 },
-            labelStyle: { fill: '#e6e8ee', fontSize: 11, fontWeight: 600 },
-            labelBgStyle: { fill: '#1e222b' },
-            labelBgPadding: [6, 3],
-            labelBgBorderRadius: 4,
-            markerEnd: { type: MarkerType.ArrowClosed, width: 20, height: 20 },
-          }"
+          :default-edge-options="edgeOptions"
           @drop="onDrop"
           @dragover="onDragOver"
           @connect="onConnect"
@@ -417,9 +447,14 @@ const nodesCount = computed(() => nodes.value.length)
           @edge-click="onEdgeClick"
           @pane-click="onPaneClick"
         >
-          <Background :variant="BackgroundVariant.Dots" :gap="20" :size="1" />
+          <Background
+            :variant="BackgroundVariant.Lines"
+            :gap="24"
+            :size="1"
+            :pattern-color="gridColor"
+          />
           <Controls />
-          <MiniMap :pannable="true" :zoomable="true" />
+          <MiniMap :pannable="true" :zoomable="true" :mask-color="miniMaskColor" :node-color="miniNodeColor" />
           <CanvasScrollbars />
         </VueFlow>
       </div>
@@ -483,6 +518,10 @@ const nodesCount = computed(() => nodes.value.length)
   flex: 1;
   min-width: 0;
   position: relative;
+  background: var(--paper);
+}
+:deep(.vue-flow) {
+  background: var(--paper);
 }
 :deep(.vue-flow__node) {
   cursor: grab;
@@ -493,21 +532,52 @@ const nodesCount = computed(() => nodes.value.length)
 :deep(.vue-flow__edge) {
   cursor: pointer;
 }
+:deep(.vue-flow__edge-path) {
+  stroke: var(--edge-line) !important;
+}
+:deep(.vue-flow__arrowhead polyline) {
+  stroke: var(--edge-line) !important;
+  fill: var(--edge-line) !important;
+}
 :deep(.vue-flow__edge-interaction) {
   stroke-width: 26px;
 }
 :deep(.vue-flow__edge:hover .vue-flow__edge-path) {
   stroke: var(--danger) !important;
-  stroke-width: 3 !important;
+  stroke-width: 2.5 !important;
 }
 :deep(.vue-flow__edge:hover .vue-flow__edge-text) {
-  fill: var(--danger);
+  fill: var(--danger) !important;
 }
 :deep(.vue-flow__edge-text) {
+  fill: var(--ink) !important;
   font-weight: 600;
+  letter-spacing: 0.02em;
+}
+:deep(.vue-flow__edge-textbg) {
+  fill: var(--surface-2) !important;
+  stroke: var(--rule) !important;
 }
 :deep(.vue-flow__minimap) {
-  background: var(--panel);
+  background: var(--surface-2);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+}
+:deep(.vue-flow__controls) {
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  overflow: hidden;
+  box-shadow: var(--shadow-node);
+}
+:deep(.vue-flow__controls-button) {
+  background: var(--surface-2);
+  border-bottom: 1px solid var(--rule);
+}
+:deep(.vue-flow__controls-button:hover) {
+  background: var(--surface);
+}
+:deep(.vue-flow__controls-button svg) {
+  fill: var(--ink-2);
 }
 .toast {
   position: fixed;
@@ -517,12 +587,13 @@ const nodesCount = computed(() => nodes.value.length)
   display: flex;
   align-items: center;
   gap: 10px;
-  max-width: min(720px, 92vw);
-  padding: 10px 14px;
-  background: var(--panel);
-  border: 1px solid var(--danger);
-  border-radius: 8px;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  max-width: min(760px, 92vw);
+  padding: 10px 12px 10px 14px;
+  background: var(--surface-2);
+  border: 1px solid var(--rule-strong);
+  border-left: 3px solid var(--danger);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-modal);
   z-index: 200;
 }
 .toast-msg {
@@ -531,18 +602,22 @@ const nodesCount = computed(() => nodes.value.length)
 }
 .toast-action {
   flex-shrink: 0;
-  border: 1px solid var(--accent);
-  color: var(--accent);
+  border: 1px solid var(--plot);
+  color: var(--plot);
   background: transparent;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   padding: 5px 10px;
   font-size: 12px;
+  font-weight: 600;
+}
+.toast-action:hover {
+  background: var(--plot-soft);
 }
 .toast-close {
   flex-shrink: 0;
   border: none;
   background: transparent;
-  color: var(--text-dim);
+  color: var(--ink-dim);
   font-size: 16px;
   line-height: 1;
 }

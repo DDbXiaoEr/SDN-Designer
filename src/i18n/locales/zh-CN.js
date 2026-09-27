@@ -1,6 +1,7 @@
 export default {
   common: {
     appName: '虚拟网络设计器',
+    nodes: '节点',
     delete: '删除',
     edit: '编辑',
     cancel: '取消',
@@ -56,6 +57,11 @@ export default {
   palette: {
     title: '节点库',
     hint: '拖拽节点到画布上',
+  },
+  theme: {
+    title: '主题',
+    light: '浅色',
+    dark: '深色',
   },
   categories: {
     ovn: 'OVN 逻辑网络',
@@ -224,6 +230,7 @@ export default {
   },
   inspector: {
     empty: '选中一个节点以编辑属性',
+    specTitle: '规格摘要',
     editHint: '双击节点可直接打开编辑弹窗',
     nicListTitle: '网卡列表（勾选「隧道」作为封装网卡）',
     sgRulesTitle: '安全组规则',

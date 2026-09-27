@@ -123,55 +123,56 @@ onBeforeUnmount(() => document.removeEventListener('mousedown', onDocPointerDown
   gap: 4px;
 }
 .provider-input {
-  width: 108px;
-  border: 1px solid var(--border);
-  background: var(--panel-2);
-  color: var(--text);
-  border-radius: 7px;
+  width: 112px;
+  border: 1px solid var(--rule-strong);
+  background: var(--surface-2);
+  color: var(--ink);
+  border-radius: var(--radius-sm);
   padding: 7px 10px;
-  font-size: 13px;
+  font-size: 12.5px;
   font-weight: 600;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-family: var(--font-mono);
 }
 .provider-toggle {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 24px;
+  width: 26px;
   height: 32px;
-  border: 1px solid var(--border);
-  background: var(--panel-2);
-  border-radius: 7px;
+  border: 1px solid var(--rule-strong);
+  background: var(--surface-2);
+  border-radius: var(--radius-sm);
   padding: 0;
 }
+.provider-toggle:hover,
 .provider-toggle.open {
-  border-color: var(--accent);
+  border-color: var(--plot);
 }
 .caret {
   width: 0;
   height: 0;
   border-left: 4px solid transparent;
   border-right: 4px solid transparent;
-  border-top: 5px solid var(--text-dim);
+  border-top: 5px solid var(--ink-dim);
 }
 .provider-panel {
   position: absolute;
   top: calc(100% + 4px);
   right: 0;
   z-index: 60;
-  width: 190px;
+  width: 196px;
   padding: 6px;
-  background: var(--panel-2);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+  background: var(--surface-2);
+  border: 1px solid var(--rule-strong);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-modal);
 }
 .provider-search {
   width: 100%;
-  border: 1px solid var(--border);
-  background: var(--panel);
-  color: var(--text);
-  border-radius: 6px;
+  border: 1px solid var(--rule-strong);
+  background: var(--surface);
+  color: var(--ink);
+  border-radius: var(--radius-sm);
   padding: 5px 8px;
   font-size: 12px;
   margin-bottom: 6px;
@@ -186,23 +187,25 @@ onBeforeUnmount(() => document.removeEventListener('mousedown', onDocPointerDown
   text-align: left;
   border: none;
   background: transparent;
-  color: var(--text);
-  border-radius: 5px;
+  color: var(--ink-2);
+  border-radius: var(--radius-sm);
   padding: 5px 8px;
   font-size: 12px;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-family: var(--font-mono);
 }
 .provider-item:hover {
-  background: rgba(79, 140, 255, 0.16);
+  background: var(--paper);
+  color: var(--ink);
 }
 .provider-item.active {
-  background: rgba(79, 140, 255, 0.24);
-  color: var(--accent);
+  background: var(--plot-soft);
+  color: var(--plot);
+  font-weight: 600;
 }
 .provider-empty {
   padding: 8px;
   font-size: 12px;
-  color: var(--text-dim);
+  color: var(--ink-dim);
   text-align: center;
 }
 </style>

@@ -48,8 +48,8 @@ watch(
 <style scoped>
 .messages {
   flex-shrink: 0;
-  background: var(--panel);
-  border-top: 1px solid var(--border);
+  background: var(--surface);
+  border-top: 1px solid var(--rule);
 }
 .messages-head {
   display: flex;
@@ -60,38 +60,48 @@ watch(
 .messages-toggle {
   border: none;
   background: transparent;
-  color: var(--text-dim);
-  font-size: 12px;
+  color: var(--ink-dim);
+  font-size: 11px;
   line-height: 1;
-  padding: 2px;
+  padding: 3px 4px;
+}
+.messages-toggle:hover {
+  color: var(--ink);
 }
 .messages-title {
-  font-size: 12px;
+  font-size: 11.5px;
   font-weight: 600;
+  letter-spacing: 0.01em;
 }
 .messages-count {
   min-width: 18px;
   padding: 0 5px;
   border-radius: 9px;
-  background: var(--panel-2);
-  color: var(--text-dim);
-  font-size: 11px;
-  line-height: 16px;
+  background: var(--surface-2);
+  border: 1px solid var(--rule);
+  color: var(--ink-dim);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  line-height: 15px;
   text-align: center;
 }
 .messages-spacer {
   flex: 1;
 }
 .messages-clear {
-  border: 1px solid var(--border);
-  background: var(--panel-2);
-  color: var(--text);
-  border-radius: 6px;
+  border: 1px solid var(--rule);
+  background: var(--surface-2);
+  color: var(--ink-2);
+  border-radius: var(--radius-sm);
   padding: 3px 10px;
   font-size: 11px;
+  font-weight: 600;
+}
+.messages-clear:hover:not(:disabled) {
+  border-color: var(--ink-2);
 }
 .messages-clear:disabled {
-  opacity: 0.4;
+  opacity: 0.45;
   cursor: default;
 }
 .messages-body {
@@ -106,32 +116,48 @@ watch(
 }
 .messages-item {
   display: flex;
-  gap: 8px;
-  padding: 3px 0;
+  align-items: baseline;
+  gap: 9px;
+  padding: 5px 0;
   font-size: 12px;
   line-height: 1.5;
-  border-top: 1px solid var(--border);
+  border-top: 1px solid var(--rule);
+}
+.messages-item::before {
+  content: '';
+  flex-shrink: 0;
+  width: 7px;
+  height: 7px;
+  border-radius: 1px;
+  background: var(--ink-dim);
+  transform: translateY(-1px);
+}
+.messages-item.warn::before {
+  background: var(--danger);
+}
+.messages-item.info::before {
+  background: var(--ovn);
 }
 .messages-time {
   flex-shrink: 0;
-  color: var(--text-dim);
-  font-family: 'SF Mono', 'Menlo', monospace;
-  font-size: 11px;
-  padding-top: 1px;
+  color: var(--ink-dim);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
 }
 .messages-text {
   white-space: pre-line;
+  color: var(--ink-2);
 }
 .messages-item.warn .messages-text {
   color: var(--danger);
 }
 .messages-item.info .messages-text {
-  color: var(--ovn);
+  color: var(--ink-2);
 }
 .messages-empty {
   margin: 0;
   padding: 4px 0;
   font-size: 11px;
-  color: var(--text-dim);
+  color: var(--ink-dim);
 }
 </style>

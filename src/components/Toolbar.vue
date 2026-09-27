@@ -47,16 +47,26 @@ function onProviderVersionChange(value) {
 <template>
   <header class="toolbar">
     <div class="brand">
-      <span class="logo">OVN</span>
+      <span class="logo" aria-hidden="true">
+        <svg viewBox="0 0 28 28" fill="none">
+          <path class="wire" d="M6.5 8.5h15M6.5 8.5v11M21.5 8.5v11M6.5 19.5h15" />
+          <circle class="pin" cx="6.5" cy="8.5" r="2.6" />
+          <circle class="pin" cx="21.5" cy="8.5" r="2.6" />
+          <circle class="pin" cx="14" cy="19.5" r="2.6" />
+        </svg>
+      </span>
       <span class="title">{{ t('common.appName') }}</span>
     </div>
-    <div class="meta">{{ t('toolbar.nodeCount', { count: nodesCount }) }}</div>
+    <div class="meta">
+      <span class="meta-k">{{ t('common.nodes') }}</span>
+      <span class="meta-v">{{ nodesCount }}</span>
+    </div>
     <div class="actions">
       <select class="vendor-select" :value="vendor" @change="onVendorChange">
         <option v-for="v in VENDORS" :key="v.value" :value="v.value">{{ t(v.label) }}</option>
       </select>
       <label class="provider-version">
-        <span>{{ t('toolbar.providerVersion') }}</span>
+        <span class="pv-label">{{ t('toolbar.providerVersion') }}</span>
         <ProviderVersionSelect
           :model-value="providerVersion"
           :options="providerVersionOptions(vendor)"
@@ -64,6 +74,7 @@ function onProviderVersionChange(value) {
           @update:model-value="onProviderVersionChange"
         />
       </label>
+      <span class="divider" aria-hidden="true" />
       <button class="ghost" @click="switchLocale">{{ t('toolbar.language') }}: {{ locale }}</button>
       <div ref="demoMenu" class="demo-menu">
         <button class="ghost" @click="demoOpen = !demoOpen">{{ t('toolbar.loadDemo') }} ▾</button>
@@ -76,6 +87,7 @@ function onProviderVersionChange(value) {
       <button class="ghost" @click="emit('clear')">{{ t('toolbar.clear') }}</button>
       <button class="ghost" @click="emit('save-design')">{{ t('toolbar.saveDesign') }}</button>
       <button class="ghost" @click="emit('import-design')">{{ t('toolbar.importDesign') }}</button>
+      <span class="divider" aria-hidden="true" />
       <button class="ovn" @click="emit('export-ovn')">{{ t('toolbar.exportOvn') }}</button>
       <button class="cloud" @click="emit('export-terraform')">{{ t('toolbar.exportTerraform') }}</button>
     </div>
@@ -84,79 +96,139 @@ function onProviderVersionChange(value) {
 
 <style scoped>
 .toolbar {
-  height: 52px;
+  min-height: 54px;
   display: flex;
   align-items: center;
-  gap: 16px;
-  padding: 0 16px;
-  background: var(--panel);
-  border-bottom: 1px solid var(--border);
+  gap: 14px;
+  flex-wrap: wrap;
+  padding: 8px 16px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--rule);
   flex-shrink: 0;
 }
 .brand {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
 }
 .logo {
-  background: var(--accent);
-  color: #0f1117;
-  font-weight: 800;
-  font-size: 13px;
-  padding: 3px 7px;
-  border-radius: 5px;
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border: 1px solid var(--ink);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+}
+.logo svg {
+  width: 22px;
+  height: 22px;
+}
+.logo .wire {
+  stroke: var(--plot);
+  stroke-width: 1.4;
+}
+.logo .pin {
+  fill: var(--surface-2);
+  stroke: var(--plot);
+  stroke-width: 1.6;
 }
 .title {
   font-weight: 700;
-  font-size: 15px;
+  font-size: 14px;
+  letter-spacing: 0.01em;
 }
 .meta {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 3px 8px;
+  border: 1px solid var(--rule);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+}
+.meta-k {
+  font-size: 10.5px;
+  color: var(--ink-dim);
+}
+.meta-v {
+  font-family: var(--font-mono);
   font-size: 12px;
-  color: var(--text-dim);
+  font-weight: 600;
 }
 .actions {
   margin-left: auto;
   display: flex;
+  align-items: center;
   gap: 8px;
+  flex-wrap: wrap;
+}
+.divider {
+  width: 1px;
+  align-self: stretch;
+  margin: 2px 2px;
+  background: var(--rule);
 }
 button {
-  border: 1px solid var(--border);
-  background: var(--panel-2);
-  color: var(--text);
-  border-radius: 7px;
-  padding: 7px 14px;
-  font-size: 13px;
+  border: 1px solid var(--rule-strong);
+  background: var(--surface-2);
+  color: var(--ink);
+  border-radius: var(--radius-sm);
+  padding: 7px 12px;
+  font-size: 12.5px;
   font-weight: 600;
+  transition: border-color 0.12s ease, background 0.12s ease, color 0.12s ease;
+}
+button:hover {
+  border-color: var(--ink-2);
 }
 button.ovn {
-  background: rgba(110, 231, 183, 0.12);
+  background: var(--ovn-soft);
   border-color: var(--ovn);
   color: var(--ovn);
 }
+button.ovn:hover {
+  background: var(--ovn);
+  color: #fff;
+}
 button.cloud {
-  background: rgba(251, 191, 36, 0.12);
+  background: var(--cloud-soft);
   border-color: var(--cloud);
   color: var(--cloud);
 }
+button.cloud:hover {
+  background: var(--cloud);
+  color: #fff;
+}
 button.ghost {
-  color: var(--text-dim);
+  background: transparent;
+  border-color: transparent;
+  color: var(--ink-dim);
+  padding: 7px 9px;
+}
+button.ghost:hover {
+  color: var(--ink);
+  background: var(--paper);
 }
 .vendor-select {
-  border: 1px solid var(--border);
-  background: var(--panel-2);
-  color: var(--text);
-  border-radius: 7px;
+  border: 1px solid var(--rule-strong);
+  background: var(--surface-2);
+  color: var(--ink);
+  border-radius: var(--radius-sm);
   padding: 7px 10px;
-  font-size: 13px;
+  font-size: 12.5px;
   font-weight: 600;
 }
 .provider-version {
   display: flex;
   align-items: center;
   gap: 6px;
-  font-size: 12px;
-  color: var(--text-dim);
+  font-size: 11.5px;
+  color: var(--ink-dim);
   white-space: nowrap;
+}
+.pv-label {
+  letter-spacing: 0.01em;
 }
 .demo-menu {
   position: relative;
@@ -165,15 +237,15 @@ button.ghost {
   position: absolute;
   right: 0;
   top: calc(100% + 6px);
-  min-width: 150px;
+  min-width: 168px;
   display: flex;
   flex-direction: column;
   gap: 2px;
   padding: 4px;
-  background: var(--panel-2);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+  background: var(--surface-2);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-modal);
   z-index: 30;
 }
 .demo-item {
@@ -181,9 +253,10 @@ button.ghost {
   background: transparent;
   text-align: left;
   padding: 7px 10px;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
 }
 .demo-item:hover {
-  background: var(--panel);
+  background: var(--paper);
+  border-color: transparent;
 }
 </style>

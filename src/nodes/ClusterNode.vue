@@ -29,15 +29,14 @@ const hostCount = computed(() => props.data.hostCount ?? 0)
 .cluster {
   width: 100%;
   height: 100%;
-  border-radius: 12px;
-  border: 2px dashed rgba(79, 140, 255, 0.6);
-  background: rgba(79, 140, 255, 0.06);
-  box-shadow: 0 2px 16px rgba(0, 0, 0, 0.4);
+  border-radius: var(--radius);
+  border: 1.5px dashed var(--plot-line);
+  background: var(--plot-soft);
   transition: border-color 0.15s ease, box-shadow 0.15s ease;
 }
 .cluster.selected {
-  border-color: var(--accent);
-  box-shadow: 0 0 0 2px rgba(79, 140, 255, 0.4);
+  border-color: var(--plot);
+  box-shadow: 0 0 0 2px var(--plot-soft);
 }
 .cluster-header {
   position: absolute;
@@ -47,33 +46,35 @@ const hostCount = computed(() => props.data.hostCount ?? 0)
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 8px 12px;
-  border-bottom: 1px solid rgba(79, 140, 255, 0.3);
-  background: rgba(79, 140, 255, 0.1);
-  border-radius: 11px 11px 0 0;
+  padding: 7px 12px;
+  border-bottom: 1px solid var(--plot-line);
+  background: var(--surface-2);
+  border-radius: var(--radius) var(--radius) 0 0;
 }
 .badge {
-  color: #0f1117;
-  font-weight: 700;
-  font-size: 11px;
-  border-radius: 4px;
-  padding: 2px 6px;
-  letter-spacing: 0.5px;
-  background: var(--ovn);
+  color: var(--ovn);
+  background: var(--ovn-soft);
+  border: 1px solid rgba(11, 138, 120, 0.35);
+  font-family: var(--font-mono);
+  font-weight: 600;
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  border-radius: var(--radius-sm);
+  padding: 2px 5px;
 }
 .cluster-name {
   font-weight: 600;
-  font-size: 13px;
+  font-size: 12.5px;
 }
 .cluster-count {
   margin-left: auto;
-  font-size: 11px;
-  color: var(--text-dim);
+  font-size: 10.5px;
+  color: var(--ink-dim);
 }
 .handle {
-  width: 12px;
-  height: 12px;
-  background: var(--accent);
-  border: 2px solid var(--panel-2);
+  width: 11px;
+  height: 11px;
+  background: var(--plot);
+  border: 2px solid var(--surface-2);
 }
 </style>

@@ -12,7 +12,7 @@
 
 ```
 OVN-Designer/
-├── index.html                 # 入口 HTML
+├── index.html                 # 入口 HTML（含首屏主题预设脚本，避免闪烁）
 ├── package.json               # 依赖与脚本 (dev / build / preview)
 ├── vite.config.js             # Vite 配置（@vitejs/plugin-vue）
 ├── .env.example               # 在线清单环境变量示例（VITE_CATALOG_*）
@@ -30,7 +30,7 @@ OVN-Designer/
     ├── main.js                # 应用入口：createApp(App).use(i18n).mount('#app')
     ├── App.vue                # 主编排：画布、拖拽、连线校验（含可用区库存提示 toast）、示例加载、保存/导入、导出、创建对话框
     ├── styles/
-    │   └── main.css           # 全局 CSS 变量（主题色）与基础样式
+    │   └── main.css           # 全局 CSS 变量与基础样式（浅色/深色主题令牌）
     ├── data/
     │   ├── nodeDefinitions.js # 节点类型元数据（唯一数据源）
     │   ├── vendors.js         # 云厂商列表 + 资源名/徽标按厂商解析 + provider 默认版本 + 切换厂商的节点配置迁移
@@ -46,13 +46,14 @@ OVN-Designer/
     │   ├── catalog.js         # 镜像/实例规格清单：本地内置 + 在线 JSON/厂商 API 合并
     │   ├── providerVersions.js # Terraform provider 已发布版本（来自 server /api/providerVersions）
     │   ├── persistence.js     # 设计序列化/反序列化 + localStorage 自动保存
+    │   ├── theme.js           # 主题（light/dark）：<html data-theme> + localStorage，提供 setTheme/toggleTheme
     │   └── vendor.js          # 当前云厂商 + 各厂商 provider 版本（ref，持久化到 localStorage）
     ├── nodes/
     │   ├── BaseNode.vue       # 通用节点外观组件（徽标/名称/摘要/多连接点）
     │   ├── ClusterNode.vue    # 集群分组节点外观（Host 自动归并后的大节点）
     │   └── index.js           # nodeTypes 映射（markRaw(BaseNode) 复用）
     ├── components/
-    │   ├── Palette.vue        # 左侧节点库（可拖拽）
+    │   ├── Palette.vue        # 左侧节点库（可拖拽，底部含浅色/深色主题切换）
     │   ├── Toolbar.vue        # 顶部工具栏（厂商/Provider 版本/语言/加载示例/清空/保存/导入/导出）
     │   ├── ProviderVersionSelect.vue # Provider 版本输入 + 已发布版本下拉（搜索，选择生成 ~> 主.次）
     │   ├── Inspector.vue      # 右侧属性面板（只读摘要 + 编辑/删除按钮）
@@ -277,3 +278,9 @@ OVN-Designer/
 3. **所有 UI 文案必须走 i18n**（`t('key')`），新文案同时在两个 locale 文件补齐。
 4. **导出逻辑**：`export/` 下均为纯函数，内部用 `translate('export.xxx')` 生成多语言注释；
    新增云厂商时在 `export/terraform/` 加对应导出器并在 `index.js` 分发。
+5. **主题（浅色/深色）**：颜色统一用 `src/styles/main.css` 的 CSS 变量
+   （浅色在 `:root`，深色在 `:root[data-theme='dark']`；分类色另有 `--ovn/--cloud/--danger` 及其
+   `-soft/-line` 变体，结构色有 `--edge-line/--overlay/--node-shadow`）。主题由 `store/theme.js`
+   管理并写入 `<html data-theme>` + localStorage，`index.html` 首屏脚本预置避免闪烁；
+   侧边栏 `Palette.vue` 底部提供切换。Vue Flow 画布的网格/小地图颜色经 `App.vue` 计算属性随主题变化，
+   连线颜色由 CSS 变量驱动（带 `!important` 覆盖内联样式），勿在模板里硬编码深色值。

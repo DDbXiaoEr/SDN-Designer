@@ -139,7 +139,7 @@ function onTrackDown(axis, e) {
 <style scoped>
 .canvas-scroll {
   position: absolute;
-  background: rgba(15, 17, 23, 0.55);
+  background: color-mix(in srgb, var(--paper) 55%, transparent);
   z-index: 6;
 }
 .canvas-scroll-x {
@@ -147,23 +147,23 @@ function onTrackDown(axis, e) {
   right: 0;
   bottom: 0;
   height: 12px;
-  border-top: 1px solid var(--border);
+  border-top: 1px solid var(--rule);
 }
 .canvas-scroll-y {
   top: 0;
   bottom: 0;
   right: 0;
   width: 12px;
-  border-left: 1px solid var(--border);
+  border-left: 1px solid var(--rule);
 }
 .thumb {
   position: absolute;
   border-radius: 6px;
-  background: var(--border);
+  background: var(--rule-strong);
   cursor: grab;
 }
 .thumb:hover {
-  background: var(--accent);
+  background: var(--plot);
 }
 .canvas-scroll-x .thumb {
   top: 2px;

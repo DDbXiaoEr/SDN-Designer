@@ -1,14 +1,68 @@
+/* 设计语言：工程制图台
+   浅色「图纸」底 + 墨线 —— 颜色只用于表达语义（逻辑网络 / 云资源 / 危险），
+   机器产物（代码）保留深色终端内嵌，与人工设计的浅色纸面形成边界。 */
 :root {
-  --bg: #0f1117;
-  --panel: #171a21;
-  --panel-2: #1e222b;
-  --border: #2a2f3a;
-  --text: #e6e8ee;
-  --text-dim: #8b93a7;
-  --accent: #4f8cff;
-  --ovn: #6ee7b7;
-  --cloud: #fbbf24;
-  --danger: #f87171;
+  color-scheme: light;
+
+  /* 纸面与墨色（中性） */
+  --paper: #e9ece8;
+  --surface: #f5f6f4;
+  --surface-2: #ffffff;
+  --ink: #171a1d;
+  --ink-2: #414951;
+  --ink-dim: #6a737c;
+  --rule: #d5dad9;
+  --rule-strong: #b7bec0;
+
+  /* 绘图蓝：选中 / 交互 / 结构 */
+  --plot: #1b54b8;
+  --plot-soft: rgba(27, 84, 184, 0.1);
+  --plot-line: rgba(27, 84, 184, 0.4);
+
+  /* 语义分类：逻辑网络 / 云资源 */
+  --ovn: #0b8a78;
+  --ovn-soft: rgba(11, 138, 120, 0.12);
+  --ovn-line: rgba(11, 138, 120, 0.35);
+  --cloud: #d9551b;
+  --cloud-soft: rgba(217, 85, 27, 0.12);
+  --cloud-line: rgba(217, 85, 27, 0.32);
+  --danger: #c0392b;
+  --danger-soft: rgba(192, 57, 43, 0.1);
+  --danger-line: rgba(192, 57, 43, 0.4);
+  --warn: #a86f0c;
+  --warn-soft: rgba(176, 117, 15, 0.12);
+
+  /* 结构：连线 / 遮罩 / 节点投影 */
+  --edge-line: #59626a;
+  --overlay: rgba(23, 26, 29, 0.42);
+  --node-shadow: 2px 2px 0 rgba(23, 26, 29, 0.05);
+
+  /* 终端（机器产物） */
+  --term-bg: #111519;
+  --term-bg-2: #0c0f12;
+  --term-text: #cdddd6;
+  --term-dim: #6d7b82;
+  --term-rule: #262e35;
+
+  /* 兼容既有组件里引用的旧变量名 */
+  --bg: var(--paper);
+  --panel: var(--surface);
+  --panel-2: var(--surface-2);
+  --border: var(--rule);
+  --text: var(--ink);
+  --text-dim: var(--ink-dim);
+  --accent: var(--plot);
+
+  --radius-sm: 3px;
+  --radius: 5px;
+  --radius-lg: 8px;
+  --shadow-modal: 0 20px 60px rgba(14, 20, 26, 0.3);
+  --shadow-node: 0 1px 0 rgba(23, 26, 29, 0.06);
+
+  --font-ui: 'Space Grotesk', -apple-system, BlinkMacSystemFont, 'Segoe UI',
+    'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
+  --font-mono: 'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, Consolas,
+    monospace;
 }
 
 * {
@@ -21,13 +75,118 @@ body,
   margin: 0;
   height: 100%;
   width: 100%;
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC',
-    'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
-  color: var(--text);
-  background: var(--bg);
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  font-family: var(--font-ui);
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--ink);
+  background: var(--paper);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+button,
+input,
+select,
+textarea {
+  font-family: inherit;
+  color: inherit;
 }
 
 button {
-  font-family: inherit;
   cursor: pointer;
+}
+
+:focus-visible {
+  outline: 2px solid var(--plot);
+  outline-offset: 1px;
+  border-radius: 2px;
+}
+
+::selection {
+  background: var(--plot-soft);
+}
+
+a {
+  color: var(--plot);
+}
+
+/* 细滚动条，融入纸面 */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--rule-strong) transparent;
+}
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--rule-strong);
+  border: 3px solid transparent;
+  background-clip: content-box;
+  border-radius: 8px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--ink-dim);
+  background-clip: content-box;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* 深色「图纸」：蓝墨底，同样只让颜色表达语义 */
+:root[data-theme='dark'] {
+  color-scheme: dark;
+
+  --paper: #14181d;
+  --surface: #1a1f26;
+  --surface-2: #222831;
+  --ink: #e8ece9;
+  --ink-2: #b9c2c6;
+  --ink-dim: #8a949a;
+  --rule: #2c343c;
+  --rule-strong: #3d4650;
+
+  --plot: #6ea8ff;
+  --plot-soft: rgba(110, 168, 255, 0.14);
+  --plot-line: rgba(110, 168, 255, 0.42);
+
+  --ovn: #3fd0b5;
+  --ovn-soft: rgba(63, 208, 181, 0.16);
+  --ovn-line: rgba(63, 208, 181, 0.45);
+  --cloud: #f0834a;
+  --cloud-soft: rgba(240, 131, 74, 0.16);
+  --cloud-line: rgba(240, 131, 74, 0.42);
+  --danger: #ef6a5c;
+  --danger-soft: rgba(239, 106, 92, 0.14);
+  --danger-line: rgba(239, 106, 92, 0.45);
+  --warn: #e0a33a;
+  --warn-soft: rgba(224, 163, 58, 0.14);
+
+  --edge-line: #7d8790;
+  --overlay: rgba(3, 6, 9, 0.58);
+  --node-shadow: 2px 2px 0 rgba(0, 0, 0, 0.35);
+
+  --term-bg: #0d1013;
+  --term-bg-2: #090b0d;
+  --term-text: #cfe0d8;
+  --term-dim: #74828a;
+  --term-rule: #232b32;
 }

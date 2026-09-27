@@ -1,6 +1,7 @@
 export default {
   common: {
     appName: 'Virtual Network Designer',
+    nodes: 'Nodes',
     delete: 'Delete',
     edit: 'Edit',
     cancel: 'Cancel',
@@ -56,6 +57,11 @@ export default {
   palette: {
     title: 'Node Library',
     hint: 'Drag nodes onto the canvas',
+  },
+  theme: {
+    title: 'Theme',
+    light: 'Light',
+    dark: 'Dark',
   },
   categories: {
     ovn: 'OVN Logical Network',
@@ -224,6 +230,7 @@ export default {
   },
   inspector: {
     empty: 'Select a node to edit its properties',
+    specTitle: 'Spec summary',
     editHint: 'Double-click a node to open the editor',
     nicListTitle: 'NICs (check "Tunnel" to use as encapsulation NIC)',
     sgRulesTitle: 'Security Group Rules',

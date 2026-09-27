@@ -110,67 +110,89 @@ function downloadAll() {
 .overlay {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.6);
+  background: var(--overlay);
   display: flex;
   align-items: center;
   justify-content: center;
   z-index: 100;
+  backdrop-filter: blur(2px);
 }
 .modal {
-  width: min(860px, 90vw);
-  height: min(80vh, 720px);
-  background: var(--panel);
-  border: 1px solid var(--border);
-  border-radius: 12px;
+  width: min(880px, 92vw);
+  height: min(82vh, 760px);
+  background: var(--surface);
+  border: 1px solid var(--rule-strong);
+  border-radius: var(--radius-lg);
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  box-shadow: var(--shadow-modal);
 }
 .modal-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  flex-wrap: wrap;
   gap: 12px;
-  padding: 14px 16px;
-  border-bottom: 1px solid var(--border);
+  padding: 13px 16px;
+  border-bottom: 1px solid var(--rule);
+  background: var(--surface-2);
 }
 .modal-title {
   font-weight: 700;
+  font-size: 14px;
 }
 .modal-actions {
   display: flex;
   align-items: center;
   gap: 8px;
+  flex-wrap: wrap;
 }
 .modal-actions button {
-  border: 1px solid var(--border);
-  background: var(--panel-2);
-  color: var(--text);
-  border-radius: 6px;
+  border: 1px solid var(--rule-strong);
+  background: var(--surface-2);
+  color: var(--ink);
+  border-radius: var(--radius-sm);
   padding: 6px 12px;
   font-size: 12px;
+  font-weight: 600;
+  transition: border-color 0.12s ease, background 0.12s ease, color 0.12s ease;
+}
+.modal-actions button:hover {
+  border-color: var(--plot);
+  color: var(--plot);
 }
 .modal-actions button.close {
-  color: var(--text-dim);
+  color: var(--ink-dim);
+  border-color: var(--rule);
+}
+.modal-actions button.close:hover {
+  border-color: var(--ink-2);
+  color: var(--ink);
 }
 .group-select {
-  border: 1px solid var(--border);
-  background: var(--panel-2);
-  color: var(--text);
-  border-radius: 6px;
+  border: 1px solid var(--rule-strong);
+  background: var(--surface-2);
+  color: var(--ink);
+  border-radius: var(--radius-sm);
   padding: 6px 8px;
   font-size: 12px;
+  font-family: var(--font-mono);
 }
 .warnings {
   padding: 10px 16px;
-  border-bottom: 1px solid var(--border);
-  background: rgba(248, 113, 113, 0.12);
-  color: var(--danger);
+  border-bottom: 1px solid var(--rule);
+  background: var(--warn-soft);
+  border-left: 3px solid var(--warn);
+  color: var(--ink-2);
   font-size: 12px;
   line-height: 1.6;
 }
 .warnings-title {
   font-weight: 700;
+  font-size: 11px;
+  letter-spacing: 0.03em;
+  color: var(--warn);
   margin-bottom: 4px;
 }
 .warnings ul {
@@ -178,29 +200,32 @@ function downloadAll() {
   padding-left: 18px;
 }
 .credentials {
-  border-bottom: 1px solid var(--border);
-  background: var(--panel-2);
+  border-bottom: 1px solid var(--rule);
+  background: var(--surface-2);
 }
 .credentials-toggle {
   width: 100%;
   text-align: left;
   border: 0;
   background: transparent;
-  color: var(--text);
+  color: var(--ink);
   padding: 10px 16px;
   font-size: 12px;
   font-weight: 700;
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 7px;
+}
+.credentials-toggle:hover {
+  color: var(--plot);
 }
 .credentials-body {
-  padding: 0 16px 12px;
+  padding: 0 16px 14px;
 }
 .credentials-hint {
-  margin: 0 0 8px;
+  margin: 0 0 10px;
   font-size: 11px;
-  line-height: 1.5;
+  line-height: 1.6;
   color: var(--danger);
 }
 .credential-field {
@@ -212,27 +237,30 @@ function downloadAll() {
 .credential-field label {
   flex: 0 0 160px;
   font-size: 11px;
-  color: var(--text-dim);
+  color: var(--ink-dim);
 }
 .credential-field input {
   flex: 1;
   min-width: 0;
   padding: 6px 8px;
-  border-radius: 6px;
-  border: 1px solid var(--border);
-  background: var(--panel);
-  color: var(--text);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--rule-strong);
+  background: var(--surface-2);
+  color: var(--ink);
   font-size: 12px;
+  font-family: var(--font-mono);
 }
 .content {
   flex: 1;
   overflow: auto;
   margin: 0;
-  padding: 16px;
-  font-family: 'SF Mono', 'Menlo', monospace;
+  padding: 16px 18px;
+  font-family: var(--font-mono);
   font-size: 12px;
-  line-height: 1.6;
-  color: #d6e2ff;
-  background: #0b0e14;
+  line-height: 1.7;
+  color: var(--term-text);
+  background: var(--term-bg);
+  border-top: 1px solid var(--term-rule);
+  tab-size: 2;
 }
 </style>

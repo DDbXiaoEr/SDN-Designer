@@ -4,10 +4,10 @@ import { useI18n } from 'vue-i18n'
 import { NODE_TYPES } from '../data/nodeDefinitions.js'
 import { diskTypeOptions, defaultDiskType } from '../data/disks.js'
 import { outputOptions } from '../data/outputs.js'
-import { nodeLabelKey } from '../data/vendors.js'
+import { nodeLabelKey, nodeBadge } from '../data/vendors.js'
 import { vendor } from '../store/vendor.js'
 import { useDesigner } from '../store/designer.js'
-import { instanceTypeZones, instanceTypeInfo, defaultImage, defaultInstanceType, instanceImageOptions, instanceTypeCatalog } from '../store/catalog.js'
+import { instanceTypeZones, instanceTypeInfo, defaultImage, defaultInstanceType, instanceImageOptions, instanceTypeCatalog, ensureCatalogRegion } from '../store/catalog.js'
 import { resolveZone, validateInstanceZones, createCloudContext, lbBackendCandidates, lbHealthCheck, instanceCount, eipInstanceCandidates, eipBindings } from '../export/terraform/common.js'
 import TransferBox from './TransferBox.vue'
 
@@ -64,12 +64,24 @@ const instanceSubnet = computed(() =>
 const instanceVpc = computed(() =>
   instanceSubnet.value ? sourceNodeOf(instanceSubnet.value.id, 'VPC') : null
 )
+const instanceRegion = computed(() =>
+  (instanceVpc.value && instanceVpc.value.data.region) || ''
+)
+
+// 有 VPC 地域时按地域拉取规格，避免默认地域清单混入当前地域不可用的项
+watch(
+  instanceRegion,
+  (region) => {
+    if (region) ensureCatalogRegion(vendor.value, region)
+  },
+  { immediate: true }
+)
 
 // 可用区库存校验：腾讯云 CVM 必须与子网同可用区，故提示需改子网可用区而非实例
 const instanceZoneCheck = computed(() => {
   if (!node.value || node.value.type !== 'Instance') return null
   const type = node.value.data.instanceType
-  const zones = instanceTypeZones(vendor.value, type)
+  const zones = instanceTypeZones(vendor.value, type, instanceRegion.value)
   if (!zones.length) return null
   const subnet = instanceSubnet.value
   if (!subnet) return { state: 'noSubnet', type }
@@ -91,8 +103,8 @@ function applySubnetZone(zone) {
 // 子网下的实例规格库存：编辑子网可用区（部署可用区）时即时提示无货实例
 const subnetStockIssues = computed(() => {
   if (!node.value || node.value.type !== 'Subnet') return []
-  return validateInstanceZones(nodes.value, edges.value, vendor.value, (type) =>
-    instanceTypeZones(vendor.value, type)
+  return validateInstanceZones(nodes.value, edges.value, vendor.value, (type, region) =>
+    instanceTypeZones(vendor.value, type, region)
   ).filter((it) => it.subnetId === node.value.id)
 })
 
@@ -315,7 +327,8 @@ const CUSTOM = '__custom__'
 const customMode = ref({})
 
 function comboOptions(f) {
-  return typeof f.options === 'function' ? f.options(vendor.value, node.value.data) : f.options || []
+  const region = node.value.type === 'Instance' ? instanceRegion.value : ''
+  return typeof f.options === 'function' ? f.options(vendor.value, node.value.data, region) : f.options || []
 }
 
 const GPU_DRIVERS = [
@@ -325,7 +338,7 @@ const GPU_DRIVERS = [
 
 const gpuTypeInfo = computed(() => {
   if (!node.value || node.value.type !== 'Instance' || !node.value.data.gpu) return null
-  return instanceTypeInfo(vendor.value, node.value.data.instanceType)
+  return instanceTypeInfo(vendor.value, node.value.data.instanceType, instanceRegion.value)
 })
 
 function gpuPatch(key, value) {
@@ -343,12 +356,12 @@ function onGpuChange(checked) {
     next.gpuDriver = 'none'
   }
   const images = instanceImageOptions(vendor.value, checked)
-  const types = instanceTypeCatalog(vendor.value, checked)
+  const types = instanceTypeCatalog(vendor.value, checked, instanceRegion.value)
   if (!images.some((o) => o.value === node.value.data.imageId)) {
     next.imageId = defaultImage(vendor.value, checked)
   }
   if (!types.some((o) => o.value === node.value.data.instanceType)) {
-    next.instanceType = defaultInstanceType(vendor.value, checked)
+    next.instanceType = defaultInstanceType(vendor.value, checked, instanceRegion.value)
   }
   const mode = { ...customMode.value }
   delete mode.imageId
@@ -479,6 +492,7 @@ function toggleOutput(key, checked) {
   <div v-if="node && def" class="overlay" @click.self="emit('close')">
     <div class="modal">
       <div class="modal-header">
+        <span class="badge" :class="def.category">{{ nodeBadge(node.type, vendor, node.data) }}</span>
         <span class="modal-title">{{ t(nodeLabelKey(def, vendor)) }}</span>
         <span class="modal-id">{{ node.id }}</span>
         <button class="close" @click="emit('close')">{{ t('common.close') }}</button>
@@ -1003,51 +1017,78 @@ function toggleOutput(key, checked) {
 .overlay {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.6);
+  background: var(--overlay);
   display: flex;
   align-items: center;
   justify-content: center;
   z-index: 100;
+  backdrop-filter: blur(2px);
 }
 .modal {
-  width: min(720px, 92vw);
-  max-height: 85vh;
-  background: var(--panel);
-  border: 1px solid var(--border);
-  border-radius: 12px;
+  width: min(740px, 94vw);
+  max-height: 86vh;
+  background: var(--surface);
+  border: 1px solid var(--rule-strong);
+  border-radius: var(--radius-lg);
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  box-shadow: var(--shadow-modal);
 }
 .modal-header {
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 14px 16px;
-  border-bottom: 1px solid var(--border);
+  padding: 13px 16px;
+  border-bottom: 1px solid var(--rule);
+  background: var(--surface-2);
 }
 .modal-title {
   font-weight: 700;
-  font-size: 15px;
+  font-size: 14px;
+}
+.badge {
+  font-family: var(--font-mono);
+  font-weight: 600;
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  border-radius: var(--radius-sm);
+  padding: 2px 5px;
+  border: 1px solid transparent;
+}
+.badge.ovn {
+  color: var(--ovn);
+  background: var(--ovn-soft);
+  border-color: var(--ovn-line);
+}
+.badge.cloud {
+  color: var(--cloud);
+  background: var(--cloud-soft);
+  border-color: var(--cloud-line);
 }
 .modal-id {
-  font-size: 11px;
-  color: var(--text-dim);
-  font-family: monospace;
+  font-size: 10.5px;
+  color: var(--ink-dim);
+  font-family: var(--font-mono);
 }
 .modal-header .close {
   margin-left: auto;
-  border: 1px solid var(--border);
-  background: var(--panel-2);
-  color: var(--text-dim);
-  border-radius: 6px;
+  border: 1px solid var(--rule-strong);
+  background: var(--surface-2);
+  color: var(--ink-dim);
+  border-radius: var(--radius-sm);
   padding: 6px 12px;
   font-size: 12px;
+  font-weight: 600;
+}
+.modal-header .close:hover {
+  border-color: var(--ink-2);
+  color: var(--ink);
 }
 .modal-body {
   flex: 1;
   overflow-y: auto;
-  padding: 16px;
+  padding: 18px 16px;
 }
 .field {
   margin-bottom: 12px;
@@ -1055,8 +1096,9 @@ function toggleOutput(key, checked) {
 .field label {
   display: block;
   font-size: 11px;
-  color: var(--text-dim);
+  color: var(--ink-dim);
   margin-bottom: 4px;
+  font-weight: 600;
 }
 .field input,
 .field select,
@@ -1064,33 +1106,46 @@ function toggleOutput(key, checked) {
 .rule select {
   width: 100%;
   padding: 7px 8px;
-  border-radius: 6px;
-  border: 1px solid var(--border);
-  background: var(--panel-2);
-  color: var(--text);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--rule-strong);
+  background: var(--surface-2);
+  color: var(--ink);
   font-size: 12px;
+  font-family: var(--font-mono);
+}
+.field input::placeholder,
+.rule input::placeholder {
+  color: var(--ink-dim);
+  font-family: var(--font-ui);
 }
 .field input[type='checkbox'] {
   width: auto;
+}
+.field input:disabled,
+.rule input:disabled {
+  background: var(--paper);
+  color: var(--ink-dim);
 }
 .combo-custom {
   margin-top: 6px;
 }
 .section {
-  margin-top: 16px;
-  border-top: 1px solid var(--border);
-  padding-top: 12px;
+  margin-top: 18px;
+  border-top: 1px solid var(--rule);
+  padding-top: 14px;
 }
 .section-title {
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 700;
+  letter-spacing: 0.03em;
+  color: var(--ink-2);
   margin-bottom: 8px;
 }
 .section-hint {
   margin: 0 0 8px;
   font-size: 11px;
-  line-height: 1.5;
-  color: var(--text-dim);
+  line-height: 1.6;
+  color: var(--ink-dim);
 }
 .section-hint.warning {
   color: var(--danger);
@@ -1110,14 +1165,14 @@ function toggleOutput(key, checked) {
   width: auto;
 }
 .rule {
-  background: var(--panel-2);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 8px;
+  background: var(--surface-2);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  padding: 9px;
   margin-bottom: 8px;
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 7px;
 }
 .rule-row {
   display: flex;
@@ -1128,33 +1183,34 @@ function toggleOutput(key, checked) {
   min-width: 0;
 }
 .hc {
-  border: 1px dashed var(--border);
-  border-radius: 6px;
-  padding: 6px 8px;
+  border: 1px dashed var(--rule-strong);
+  border-radius: var(--radius-sm);
+  padding: 8px;
 }
 .hc-head {
   display: flex;
   align-items: center;
   gap: 6px;
   font-size: 11px;
-  color: var(--text-dim);
+  font-weight: 600;
+  color: var(--ink-2);
   cursor: pointer;
 }
 .hc-head input {
   width: auto;
 }
 .hc-grid {
-  margin-top: 6px;
+  margin-top: 8px;
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 6px;
+  gap: 8px;
 }
 .hc-field {
   display: flex;
   flex-direction: column;
-  gap: 2px;
-  font-size: 10px;
-  color: var(--text-dim);
+  gap: 3px;
+  font-size: 10.5px;
+  color: var(--ink-dim);
 }
 .hc-field.wide {
   grid-column: 1 / -1;
@@ -1162,14 +1218,14 @@ function toggleOutput(key, checked) {
 .gpu-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 6px;
+  gap: 8px;
 }
 .nic-tunnel {
   display: flex;
   align-items: center;
   gap: 6px;
   font-size: 12px;
-  color: var(--text-dim);
+  color: var(--ink-dim);
 }
 .nic-tunnel input {
   width: auto;
@@ -1178,15 +1234,26 @@ function toggleOutput(key, checked) {
   margin-left: auto;
 }
 button {
-  border: 1px solid var(--border);
-  background: var(--panel-2);
-  color: var(--text);
-  border-radius: 6px;
+  border: 1px solid var(--rule-strong);
+  background: var(--surface-2);
+  color: var(--ink);
+  border-radius: var(--radius-sm);
   padding: 6px 10px;
   font-size: 12px;
+  font-weight: 600;
+  transition: border-color 0.12s ease, background 0.12s ease, color 0.12s ease;
+}
+button:hover {
+  border-color: var(--ink-2);
 }
 button.danger {
   color: var(--danger);
+  border-color: var(--danger-line);
+}
+button.danger:hover {
+  background: var(--danger);
+  color: #fff;
+  border-color: var(--danger);
 }
 button.mini {
   padding: 4px 8px;
@@ -1194,6 +1261,12 @@ button.mini {
 }
 button.add {
   width: 100%;
-  color: var(--accent);
+  color: var(--plot);
+  border-color: var(--plot);
+  background: var(--plot-soft);
+}
+button.add:hover {
+  background: var(--plot);
+  color: #fff;
 }
 </style>
