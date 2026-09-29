@@ -17,7 +17,7 @@ const props = defineProps({
 
 const emit = defineEmits(['close'])
 const { t, te } = useI18n()
-const { nodes, edges, updateNodeData } = useDesigner()
+const { nodes, edges, updateNodeData, recomputeClusters } = useDesigner()
 
 const node = computed(() => nodes.value.find((n) => n.id === props.nodeId))
 const def = computed(() => (node.value ? NODE_TYPES[node.value.type] : null))
@@ -390,12 +390,15 @@ function onComboSelect(f, value) {
 
 function patchController(value) {
   patch('controller', value)
-  if (!value) return
-  for (const n of nodes.value) {
-    if (n.type === 'Host' && n.id !== node.value.id && n.data.controller) {
-      updateNodeData(n.id, { controller: false })
+  if (value) {
+    for (const n of nodes.value) {
+      if (n.type === 'Host' && n.id !== node.value.id && n.data.controller) {
+        updateNodeData(n.id, { controller: false })
+      }
     }
   }
+  // 控制节点不参与计算集群，勾选变化后立即重算分组
+  recomputeClusters()
 }
 
 function addRule() {

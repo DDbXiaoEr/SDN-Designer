@@ -20,8 +20,10 @@ const hostCount = computed(() => props.data.hostCount ?? 0)
       <span class="cluster-name">{{ data.name }}</span>
       <span class="cluster-count">{{ hostCount }} {{ t('summary.hosts') }}</span>
     </div>
-    <Handle type="target" id="target-0" :position="Position.Left" class="handle" />
-    <Handle type="source" id="source-0" :position="Position.Right" class="handle" />
+    <Handle type="target" id="target-0" :position="Position.Left" class="handle" style="top: 40%" />
+    <Handle type="target" id="target-1" :position="Position.Left" class="handle" style="top: 70%" />
+    <Handle type="source" id="source-0" :position="Position.Right" class="handle" style="top: 40%" />
+    <Handle type="source" id="source-1" :position="Position.Right" class="handle" style="top: 70%" />
   </div>
 </template>
 

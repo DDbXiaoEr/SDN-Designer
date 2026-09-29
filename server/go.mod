@@ -6,14 +6,17 @@ require (
 	github.com/alibabacloud-go/darabonba-openapi/v2 v2.2.4
 	github.com/alibabacloud-go/ecs-20140526/v4 v4.26.10
 	github.com/alibabacloud-go/tea v1.5.3
+	github.com/alibabacloud-go/vpc-20160428/v6 v6.16.0
 	github.com/aws/aws-sdk-go-v2 v1.47.0
 	github.com/aws/aws-sdk-go-v2/config v1.33.5
 	github.com/aws/aws-sdk-go-v2/credentials v1.20.5
 	github.com/aws/aws-sdk-go-v2/service/ec2 v1.332.0
 	github.com/gin-gonic/gin v1.12.0
 	github.com/huaweicloud/huaweicloud-sdk-go-v3 v0.1.215
-	github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/common v1.3.180
+	github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/common v1.3.188
 	github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/cvm v1.3.151
+	github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/vpc v1.3.188
+	gopkg.in/yaml.v3 v3.0.1
 )
 
 require (
@@ -68,5 +71,4 @@ require (
 	golang.org/x/text v0.34.0 // indirect
 	google.golang.org/protobuf v1.36.10 // indirect
 	gopkg.in/ini.v1 v1.67.0 // indirect
-	gopkg.in/yaml.v3 v3.0.1 // indirect
 )

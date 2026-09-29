@@ -190,3 +190,20 @@ a {
   --term-dim: #74828a;
   --term-rule: #232b32;
 }
+
+/* Teleport 后的小地图脱离 VueFlow，需全局覆盖 Panel 的绝对定位 */
+#page-minimap .vue-flow__minimap,
+#page-minimap .vue-flow__panel {
+  position: static !important;
+  top: auto !important;
+  right: auto !important;
+  bottom: auto !important;
+  left: auto !important;
+  width: 100% !important;
+  height: 100% !important;
+  min-height: 0;
+  margin: 0 !important;
+  background: var(--surface-2);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+}

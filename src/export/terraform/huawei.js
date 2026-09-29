@@ -1,4 +1,4 @@
-import { createCloudContext, resolveNextHopNode, parsePortRange, resolveVpcRegion, resolveZone, gatewayEips, gatewaySnatSources, vpcSubnets, lbSubnets, lbVpc, lbHealthCheck, instanceLoginAuth, resolveInstanceKeyPair, collectKeyPairs, resolveInterconnects, routeTablesOfVpc, tlsKeyBlocks, hclLines, systemDiskConfig, dataDiskConfigs, gpuUserDataExpr, clean, instanceRef, instanceCount, isCountedInstance, instancePrivateIp, instancePrivateIpAt, instanceNameExpr, eipCount, eipRef, eipNameExpr, eipInstanceCandidates, eipBindings } from './common.js'
+import { createCloudContext, resolveNextHopNode, parsePortRange, resolveVpcRegion, resolveZone, gatewayEips, gatewaySnatSources, vpcSubnets, lbSubnets, lbVpc, lbHealthCheck, instanceLoginAuth, resolveInstanceKeyPair, collectKeyPairs, resolveInterconnects, routeTablesOfVpc, tlsKeyBlocks, hclLines, systemDiskConfig, dataDiskConfigs, gpuUserDataExpr, clean, instanceRef, instanceCount, isCountedInstance, instancePrivateIp, instancePrivateIpAt, instanceNameExpr, eipCount, eipRef, eipNameExpr, eipInstanceCandidates, eipBindings, isExisting, existingDataBlocks } from './common.js'
 import { parseCidr } from '../utils.js'
 import { translate } from '../../i18n/index.js'
 import { buildOutputs } from './outputs.js'
@@ -99,19 +99,19 @@ function huaweiChargeRows(chargeType) {
 }
 
 export function exportHuaweiTerraform(nodes, edges, providerVersion) {
-  const ctx = createCloudContext(nodes, edges, resourceTypes)
+  const ctx = createCloudContext(nodes, edges, resourceTypes, 'huawei')
   const { ref, findVpc, findSubnet } = ctx
   const region = resolveVpcRegion(nodes, 'cn-north-4')
-  const blocks = []
+  const blocks = [...existingDataBlocks(ctx, 'huawei')]
 
-  for (const vpc of nodes.filter((n) => n.type === 'VPC')) {
+  for (const vpc of nodes.filter((n) => n.type === 'VPC' && !isExisting(n))) {
     blocks.push(`resource "huaweicloud_vpc" "${ctx.name(vpc)}" {
   name = "${clean(vpc.data.name)}"
   cidr = "${vpc.data.cidr}"
 }`)
   }
 
-  for (const sub of nodes.filter((n) => n.type === 'Subnet')) {
+  for (const sub of nodes.filter((n) => n.type === 'Subnet' && !isExisting(n))) {
     const vpc = findVpc(sub)
     const vpcRef = vpc ? ref(vpc) + '.id' : `"" # ${tt('unassociatedVpc')}`
     blocks.push(`resource "huaweicloud_vpc_subnet" "${ctx.name(sub)}" {
@@ -123,7 +123,7 @@ export function exportHuaweiTerraform(nodes, edges, providerVersion) {
 }`)
   }
 
-  for (const sg of nodes.filter((n) => n.type === 'SecurityGroup')) {
+  for (const sg of nodes.filter((n) => n.type === 'SecurityGroup' && !isExisting(n))) {
     blocks.push(`resource "huaweicloud_networking_secgroup" "${ctx.name(sg)}" {
   name = "${clean(sg.data.name)}"
 }`)
@@ -144,7 +144,7 @@ export function exportHuaweiTerraform(nodes, edges, providerVersion) {
     })
   }
 
-  for (const eip of nodes.filter((n) => n.type === 'Eip')) {
+  for (const eip of nodes.filter((n) => n.type === 'Eip' && !isExisting(n))) {
     const chargeMode = eip.data.internetChargeType === 'payByBandwidth' ? 'bandwidth' : 'traffic'
     const eipCountLine = isCountedInstance(eip) ? `\n  count = ${eipCount(eip)}` : ''
     blocks.push(`resource "huaweicloud_vpc_eip" "${ctx.name(eip)}" {${eipCountLine}
@@ -170,7 +170,7 @@ export function exportHuaweiTerraform(nodes, edges, providerVersion) {
   }
 
   let snatSeq = 0 // SNAT 规则资源名后缀，保证多个网关/子网组合唯一
-  for (const gw of nodes.filter((n) => n.type === 'Gateway')) {
+  for (const gw of nodes.filter((n) => n.type === 'Gateway' && !isExisting(n))) {
     const sub = findSubnet(gw)
     const vpc = findVpc(gw)
     const vpcRef = vpc ? ref(vpc) + '.id' : `"" # ${tt('unassociatedVpc')}`
@@ -208,7 +208,7 @@ export function exportHuaweiTerraform(nodes, edges, providerVersion) {
   }
 
   // 负载均衡：ELB 实例 + 每个监听规则一个监听器/后端服务器组/成员
-  for (const lb of nodes.filter((n) => n.type === 'LoadBalancer')) {
+  for (const lb of nodes.filter((n) => n.type === 'LoadBalancer' && !isExisting(n))) {
     const vpc = lbVpc(ctx, lb)
     const sub = lbSubnets(ctx, lb)[0]
     const zone = resolveZone(sub && sub.data.zone, (vpc && vpc.data.region) || region, 'huawei')
@@ -306,7 +306,7 @@ ${hclLines(mrows)}
 ${tlsKeyBlocks(keyName, resName)}`)
   }
 
-  for (const inst of nodes.filter((n) => n.type === 'Instance')) {
+  for (const inst of nodes.filter((n) => n.type === 'Instance' && !isExisting(n))) {
     const sub = findSubnet(inst)
     const subRef = sub ? ref(sub) + '.id' : `"" # ${tt('unassociatedVswitch')}`
     const sgs = ctx.targetNodes(inst.id).filter((n) => n.type === 'SecurityGroup')
@@ -363,7 +363,7 @@ ${hclLines(rows)}${dataDiskBlock}
 }`)
   }
 
-  for (const rt of nodes.filter((n) => n.type === 'RouteTable')) {
+  for (const rt of nodes.filter((n) => n.type === 'RouteTable' && !isExisting(n))) {
     const vpc = findVpc(rt)
     const vpcRef = vpc ? ref(vpc) + '.id' : `"" # ${tt('unassociatedVpc')}`
     blocks.push(`resource "huaweicloud_vpc_route_table" "${ctx.name(rt)}" {

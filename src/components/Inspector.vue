@@ -60,6 +60,7 @@ const summary = computed(() =>
 .inspector {
   width: 288px;
   flex-shrink: 0;
+  order: 2;
   background: var(--surface);
   border-left: 1px solid var(--rule);
   padding: 16px;

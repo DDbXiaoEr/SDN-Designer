@@ -1,12 +1,12 @@
 <script setup>
-import { ref, computed, watch } from 'vue'
-import { VueFlow, MarkerType } from '@vue-flow/core'
+import { ref, computed, watch, onMounted } from 'vue'
+import { VueFlow, MarkerType, ConnectionMode } from '@vue-flow/core'
 import { useI18n } from 'vue-i18n'
 import { Background, BackgroundVariant } from '@vue-flow/background'
 import { Controls } from '@vue-flow/controls'
 import { MiniMap } from '@vue-flow/minimap'
 import { nodeTypes } from './nodes/index.js'
-import { NODE_TYPES, canConnect } from './data/nodeDefinitions.js'
+import { NODE_TYPES, resolveConnection, isComputeTunnel, isControllerHost, orientControlPlaneConnection } from './data/nodeDefinitions.js'
 import { nodeLabelKey, retargetCloudNodeData } from './data/vendors.js'
 import { createDemoDesign } from './data/demo.js'
 import { createDesigner, nextId } from './store/designer.js'
@@ -23,6 +23,7 @@ import Toolbar from './components/Toolbar.vue'
 import Inspector from './components/Inspector.vue'
 import ExportModal from './components/ExportModal.vue'
 import CreateHostDialog from './components/CreateHostDialog.vue'
+import ImportInventoryDialog from './components/ImportInventoryDialog.vue'
 import NodeEditorDialog from './components/NodeEditorDialog.vue'
 import MessagePanel from './components/MessagePanel.vue'
 import CanvasScrollbars from './components/CanvasScrollbars.vue'
@@ -33,12 +34,18 @@ import '@vue-flow/minimap/dist/style.css'
 import '@vue-flow/controls/dist/style.css'
 
 const designer = createDesigner()
+// Teleport 与目标同属 App，需等整棵树挂载后再传送，否则找不到 #page-minimap
+const minimapReady = ref(false)
+onMounted(() => {
+  minimapReady.value = true
+})
 const { vf, selectedId, nodes, edges, addNode, removeEdge, updateNodeData, clear, recomputeClusters } = designer
 const { screenToFlowCoordinate } = vf
 const { t } = useI18n()
 
 const exportModal = ref(null)
 const hostDialogOpen = ref(false)
+const inventoryDialogOpen = ref(false)
 const editorOpen = ref(false)
 const editorNodeId = ref(null)
 const pendingDropPosition = ref(null)
@@ -108,11 +115,14 @@ function nodeRef(node) {
 
 // 连线不合法时给出针对性提示：优先提示方向反了，其次引导常见场景，最后给通用说明
 function connectionHint(source, target) {
-  if (canConnect(target.type, source.type)) {
+  if (resolveConnection(target, source)) {
     return t('messages.reverseHint', { from: nodeRef(target), to: nodeRef(source) })
   }
   if (source.type === 'Instance' && (target.type === 'Gateway' || target.type === 'Eip')) {
     return t('messages.instanceEgressHint')
+  }
+  if (source.type === 'Cluster' && target.type === 'Host' && !isControllerHost(target)) {
+    return t('messages.clusterControllerHint')
   }
   return t('messages.connectionHint')
 }
@@ -123,8 +133,11 @@ function applyDemo(key = 'basic') {
   const withLabels = demoEdges.map((e) => {
     const source = demoNodes.find((n) => n.id === e.source)
     const target = demoNodes.find((n) => n.id === e.target)
-    const rule = source && target ? canConnect(source.type, target.type) : null
-    return { ...e, type: 'default', label: rule ? t(rule.label) : '' }
+    const oriented = orientControlPlaneConnection(source, target, e)
+    const from = demoNodes.find((n) => n.id === oriented.source)
+    const to = demoNodes.find((n) => n.id === oriented.target)
+    const rule = resolveConnection(from, to)
+    return { ...oriented, type: 'default', label: rule ? t(rule.label) : '' }
   })
   vf.setNodes(demoNodes)
   vf.setEdges(withLabels)
@@ -135,6 +148,33 @@ function applyDemo(key = 'basic') {
 function onLoadDemo(key) {
   if (nodes.value.length && !window.confirm(t('toolbar.loadDemoConfirm'))) return
   applyDemo(key)
+}
+
+function onImportInventory() {
+  inventoryDialogOpen.value = true
+}
+
+function applyInventoryDesign(design) {
+  const loadedNodes = design.nodes || []
+  const loadedEdges = (design.edges || []).map((e) => {
+    const source = loadedNodes.find((n) => n.id === e.source)
+    const target = loadedNodes.find((n) => n.id === e.target)
+    const oriented = orientControlPlaneConnection(source, target, e)
+    const from = loadedNodes.find((n) => n.id === oriented.source)
+    const to = loadedNodes.find((n) => n.id === oriented.target)
+    const rule = resolveConnection(from, to)
+    return { ...oriented, type: 'default', label: rule ? t(rule.label) : '' }
+  })
+  vf.setNodes(loadedNodes)
+  vf.setEdges(loadedEdges)
+  selectedId.value = null
+  inventoryDialogOpen.value = false
+  requestAnimationFrame(() => vf.fitView && vf.fitView({ padding: 0.2 }))
+}
+
+function onInventoryConfirm(design) {
+  if (nodes.value.length && !window.confirm(t('importInventory.confirmReplace'))) return
+  applyInventoryDesign(design)
 }
 
 // 首次访问（从未保存过设计）时展示示例；用户清空后的空设计不会再次触发
@@ -186,7 +226,7 @@ function onConnect(conn) {
   const source = nodes.value.find((n) => n.id === conn.source)
   const target = nodes.value.find((n) => n.id === conn.target)
   if (!source || !target) return
-  const rule = canConnect(source.type, target.type)
+  const rule = resolveConnection(source, target)
   if (!rule) {
     // 不允许的连线：写入消息区域并给出原因/建议，避免用户以为没反应
     pushMessage(
@@ -195,8 +235,12 @@ function onConnect(conn) {
     )
     return
   }
+  // 控制面：双向拖线都收下，落边统一成集群/计算节点 → 控制节点
+  const oriented = orientControlPlaneConnection(source, target, conn)
   const exists = edges.value.some(
-    (e) => e.source === conn.source && e.target === conn.target
+    (e) =>
+      (e.source === oriented.source && e.target === oriented.target) ||
+      (e.source === oriented.target && e.target === oriented.source)
   )
   if (exists) {
     pushMessage(
@@ -208,15 +252,15 @@ function onConnect(conn) {
   vf.addEdges([
     {
       id: nextId('e'),
-      source: conn.source,
-      target: conn.target,
-      sourceHandle: conn.sourceHandle,
-      targetHandle: conn.targetHandle,
+      source: oriented.source,
+      target: oriented.target,
+      sourceHandle: oriented.sourceHandle,
+      targetHandle: oriented.targetHandle,
       label: t(rule.label),
       type: 'default',
     },
   ])
-  if (source.type === 'Host' && target.type === 'Host') {
+  if (isComputeTunnel(source, target)) {
     recomputeClusters()
   }
   // 云主机接入子网即确定了部署可用区，立即校验规格在该可用区是否有货
@@ -272,7 +316,7 @@ function onEditSelected() {
 function onEdgeClick({ edge }) {
   const src = nodes.value.find((n) => n.id === edge.source)
   const tgt = nodes.value.find((n) => n.id === edge.target)
-  const isTunnel = src && tgt && src.type === 'Host' && tgt.type === 'Host'
+  const isTunnel = isComputeTunnel(src, tgt)
   removeEdge(edge.id)
   if (isTunnel) recomputeClusters()
 }
@@ -428,14 +472,23 @@ const edgeOptions = computed(() => ({
       @clear="clear"
       @save-design="saveDesign"
       @import-design="triggerImport"
+      @import-inventory="onImportInventory"
       @load-demo="onLoadDemo"
       @change-vendor="onVendorChange"
     />
+    <!-- 底部先挂载，Teleport 才能找到 #page-minimap；视觉上用 order 仍放在最下 -->
+    <div class="bottom">
+      <MessagePanel :messages="messages" @clear="clearMessages" />
+      <div id="page-minimap" class="page-minimap" />
+    </div>
     <div class="main">
       <Palette />
+      <!-- 先挂属性栏，视觉顺序用 flex order 保持画布在中、属性栏在右 -->
+      <Inspector @edit="onEditSelected" />
       <div class="canvas">
         <VueFlow
           :node-types="nodeTypes"
+          :connection-mode="ConnectionMode.Loose"
           :snap-to-grid="true"
           :snap-grid="[16, 16]"
           :default-edge-options="edgeOptions"
@@ -454,14 +507,14 @@ const edgeOptions = computed(() => ({
             :pattern-color="gridColor"
           />
           <Controls />
-          <MiniMap :pannable="true" :zoomable="true" :mask-color="miniMaskColor" :node-color="miniNodeColor" />
+          <!-- MiniMap 必须作为 VueFlow 子节点才能拿到画布上下文；挂载后再 Teleport 到消息栏右侧 -->
+          <Teleport v-if="minimapReady" to="#page-minimap">
+            <MiniMap :pannable="true" :zoomable="true" :mask-color="miniMaskColor" :node-color="miniNodeColor" />
+          </Teleport>
           <CanvasScrollbars />
         </VueFlow>
       </div>
-      <Inspector @edit="onEditSelected" />
     </div>
-
-    <MessagePanel :messages="messages" @clear="clearMessages" />
 
     <ExportModal
       v-if="exportModal"
@@ -477,6 +530,12 @@ const edgeOptions = computed(() => ({
       v-if="hostDialogOpen"
       @confirm="onHostConfirm"
       @cancel="onHostCancel"
+    />
+
+    <ImportInventoryDialog
+      v-if="inventoryDialogOpen"
+      @confirm="onInventoryConfirm"
+      @cancel="inventoryDialogOpen = false"
     />
 
     <NodeEditorDialog
@@ -513,13 +572,35 @@ const edgeOptions = computed(() => ({
   display: flex;
   flex: 1;
   min-height: 0;
+  order: 1;
 }
 .canvas {
   flex: 1;
   min-width: 0;
+  order: 1;
   position: relative;
   background: var(--paper);
 }
+.bottom {
+  display: flex;
+  flex-shrink: 0;
+  align-items: stretch;
+  order: 2;
+  min-height: 0;
+  border-top: 1px solid var(--rule);
+  background: var(--surface);
+}
+.page-minimap {
+  flex: 0 0 288px;
+  width: 288px;
+  min-height: 150px;
+  display: flex;
+  align-items: stretch;
+  padding: 8px;
+  border-left: 1px solid var(--rule);
+  background: var(--surface);
+}
+
 :deep(.vue-flow) {
   background: var(--paper);
 }
@@ -560,8 +641,6 @@ const edgeOptions = computed(() => ({
 }
 :deep(.vue-flow__minimap) {
   background: var(--surface-2);
-  border: 1px solid var(--rule);
-  border-radius: var(--radius);
 }
 :deep(.vue-flow__controls) {
   border: 1px solid var(--rule);

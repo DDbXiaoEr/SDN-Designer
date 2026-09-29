@@ -49,6 +49,7 @@ function handleTop(i, total) {
       <span class="badge">{{ nodeBadge(props.type, vendor, props.data) }}</span>
       <span class="node-name">{{ displayName }}</span>
       <span v-if="data.count > 1" class="count">×{{ data.count }}</span>
+      <span v-if="data.existing" class="existing">{{ t('summary.existing') }}</span>
       <span v-if="data.controller" class="ctrl">{{ t('nodes.controllerBadge') }}</span>
     </div>
     <div class="node-body">
@@ -146,6 +147,17 @@ function handleTop(i, total) {
   background: var(--cloud-soft);
   color: var(--cloud);
   border: 1px solid var(--cloud-line);
+  font-family: var(--font-mono);
+  font-weight: 600;
+  font-size: 9.5px;
+  border-radius: var(--radius-sm);
+  padding: 1px 5px;
+}
+.existing {
+  flex-shrink: 0;
+  background: var(--surface-2);
+  color: var(--ink-dim);
+  border: 1px dashed var(--rule-strong);
   font-family: var(--font-mono);
   font-weight: 600;
   font-size: 9.5px;

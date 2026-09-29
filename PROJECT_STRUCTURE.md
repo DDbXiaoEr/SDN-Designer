@@ -22,13 +22,14 @@ OVN-Designer/
 │   ├── main.go                # 入口：Gin 路由 / CORS / 优雅退出
 │   ├── internal/config/       # 配置：YAML 文件（环境变量可覆盖，密钥全部可配置）
 │   ├── internal/catalog/      # Item/Provider 抽象、TTL 缓存、HTTP 接口
-│   ├── internal/provider/     # 腾讯/阿里/AWS/华为实现 + mock + 注册表
+│   ├── internal/inventory/    # 已有云资源拓扑（VPC/子网/实例等）抽象、TTL 缓存、HTTP 接口
+│   ├── internal/provider/     # 腾讯/阿里/AWS/华为实现 + mock + 注册表（含库存拉取）
 │   ├── internal/tfversion/    # Terraform provider 已发布版本（Registry 拉取 + 缓存 + mock）
 │   ├── config.example.yaml    # 服务配置示例（复制为 config.yaml）
 │   └── README.md / README.en.md # 接口与运行说明（中英文）
 └── src/
     ├── main.js                # 应用入口：createApp(App).use(i18n).mount('#app')
-    ├── App.vue                # 主编排：画布、拖拽、连线校验（含可用区库存提示 toast）、示例加载、保存/导入、导出、创建对话框
+    ├── App.vue                # 主编排：画布、拖拽、连线校验（含可用区库存提示 toast）、示例加载、保存/导入、关联现有实例、导出、创建对话框
     ├── styles/
     │   └── main.css           # 全局 CSS 变量与基础样式（浅色/深色主题令牌）
     ├── data/
@@ -39,11 +40,13 @@ OVN-Designer/
     │   ├── disks.js           # 各云厂商云盘类型（系统盘/数据盘）
     │   ├── outputs.js         # 云资源「创建后可获取」属性（资源 ID/公网 IP）
     │   ├── demo.js            # 内置示例拓扑（多套：基础/负载均衡；首次访问自动加载基础示例，工具栏下拉切换）
+    │   ├── inventoryLayout.js # 云上库存图 → 画布节点/边布局
     │   ├── images.js          # 各云厂商本地内置镜像列表（在线清单兜底）
     │   └── instanceTypes.js   # 各云厂商本地内置实例规格列表（在线清单兜底）
     ├── store/
     │   ├── designer.js        # 状态管理（provide/inject 封装 useVueFlow）
     │   ├── catalog.js         # 镜像/实例规格清单：本地内置 + 在线 JSON/厂商 API 合并
+    │   ├── inventory.js       # 按地域拉取已有云资源（来自 server /api/inventory）
     │   ├── providerVersions.js # Terraform provider 已发布版本（来自 server /api/providerVersions）
     │   ├── persistence.js     # 设计序列化/反序列化 + localStorage 自动保存
     │   ├── theme.js           # 主题（light/dark）：<html data-theme> + localStorage，提供 setTheme/toggleTheme
@@ -54,11 +57,12 @@ OVN-Designer/
     │   └── index.js           # nodeTypes 映射（markRaw(BaseNode) 复用）
     ├── components/
     │   ├── Palette.vue        # 左侧节点库（可拖拽，底部含浅色/深色主题切换）
-    │   ├── Toolbar.vue        # 顶部工具栏（厂商/Provider 版本/语言/加载示例/清空/保存/导入/导出）
+    │   ├── Toolbar.vue        # 顶部工具栏（厂商/Provider 版本/语言/加载示例/清空/保存/导入/关联现有实例/导出）
     │   ├── ProviderVersionSelect.vue # Provider 版本输入 + 已发布版本下拉（搜索，选择生成 ~> 主.次）
     │   ├── Inspector.vue      # 右侧属性面板（只读摘要 + 编辑/删除按钮）
     │   ├── NodeEditorDialog.vue # 节点编辑弹窗（字段编辑 + 网卡/规则/路由/磁盘/输出分区）
 │   ├── CreateHostDialog.vue # 创建宿主机对话框（填写网卡信息）
+│   ├── ImportInventoryDialog.vue # 关联现有实例：选地域、拉取库存、预览后绘制到画布
 │   ├── ExportModal.vue    # 导出结果弹窗（分组查看/复制/下载/打包 ZIP/填写凭证）
 │   ├── MessagePanel.vue   # 底部消息区域（连线被拒等提示，可展开/收起/清空）
 │   ├── TransferBox.vue    # 穿梭框（负载均衡后端选择，左候选/右已选）
@@ -67,7 +71,7 @@ OVN-Designer/
     │   ├── utils.js           # 通用工具：CIDR/MAC/图关系/computeZones/download/createZip
     │   ├── ovn.js             # exportOvn(nodes, edges) -> {targets, all}（按执行节点拆分）
     │   └── terraform/
-    │       ├── common.js      # 导出共享上下文与工具（命名/引用/VPC解析/下一跳/密钥对/磁盘/tls）
+    │       ├── common.js      # 导出共享上下文与工具（命名/引用/已有资源 data source/VPC解析/下一跳/密钥对/磁盘/tls）
     │       ├── outputs.js     # buildOutputs：生成 output.tf（创建后可获取属性）
     │       ├── index.js       # exportTerraform(nodes, edges, vendor) 按厂商分发
     │       ├── aliyun.js      # 阿里云 Terraform 导出
@@ -87,7 +91,7 @@ OVN-Designer/
 
 节点对象：`{ id, type, position: {x,y}, data: {...} }`
 
-`data` 由 `NODE_TYPES[type].defaults()` 生成，各类型字段如下：
+`data` 由 `NODE_TYPES[type].defaults()` 生成。从云上「关联现有实例」导入的节点额外带 `existing: true` 与 `cloudId`（云资源 ID），导出 Terraform 时生成 `data` 而非 `resource`。各类型字段如下：
 
 | type            | 分类    | data 关键字段                                      |
 | --------------- | ------- | -------------------------------------------------- |
@@ -95,7 +99,7 @@ OVN-Designer/
 | LogicalRouter   | ovn     | `name`, `externalNetwork`                          |
 | Host            | ovn     | `name`, `encapType`, `nics[{name,ip,tunnel}]`      |
 | Cluster         | ovn     | `name`, `hostCount`（自动生成，不进节点库）        |
-| VM              | ovn     | `name`, `ip`, `mac`                                |
+| VM              | ovn     | `name`, `ip`, `mac`（画布上的 VM 即宿主机上的 netns） |
 | VPC             | cloud   | `name`, `cidr`, `region`                           |
 | Subnet          | cloud   | `name`, `cidr`, `zone`                             |
 | Gateway         | cloud   | `name`（NAT 网关）                                 |
@@ -112,13 +116,20 @@ OVN-Designer/
 - `NODE_TYPES` 的 `label` / `fields[].label` / `summary` 键 / `CONNECTION_RULES[].label`
   均为 i18n key，组件内用 `t()` 翻译（字面量选项如 `Geneve`/`VXLAN` 原样返回）。
 - 连接规则见 `CONNECTION_RULES`，`canConnect(sourceType, targetType)` 校验。
-- 「区域（zone）」= Host 节点通过 Host↔Host 隧道连线形成的连通分量，
+- 「区域（zone）」= 计算 Host 通过 Host↔Host 隧道连线形成的连通分量（勾选「控制节点」的 Host 不参与），
   由 `computeZones(nodes, edges)` 计算；`LogicalSwitch → Host` 连线表示交换机部署到该区域。
-- 当多个 Host 通过隧道互联时，`designer.js` 的 `recomputeClusters()` 会自动把它们归并为
+- `VM → LogicalSwitch` 表示挂载逻辑端口；`VM → Host` 表示该 VM（netns）部署到该宿主机。
+  导出时控制节点对端口设置 `requested-chassis=<hostname>`，并在对应宿主机脚本中生成
+  `ip netns` + veth + `ovs-vsctl add-port br-int`（`external_ids:iface-id` 对齐逻辑端口）。
+  若 VM 部署在控制节点上，netns 命令写入 central 脚本并给出 chassis 未注册的注释。
+- 当多个计算 Host 通过隧道互联时，`designer.js` 的 `recomputeClusters()` 会自动把它们归并为
   一个 `Cluster` 分组节点（Vue Flow parent/child），`VPC → Cluster` 连线表示 VPC 部署到该集群。
   删除 Cluster 节点会解散分组（移除内部隧道连线并还原 Host 绝对位置）。
+  `Cluster → Host(控制节点)` 表示集群接入控制面（箭头指向控制节点，等效于集群内全部计算节点接入）；
+  单独的计算 Host 也可直连控制节点。导出时只有已接入的计算节点写入 `ovn-remote` 并 `chassis-add`。
+  画布小地图 Teleport 到底部消息栏右侧（`#page-minimap`，与属性栏同宽 288px），不遮挡画布节点。
 - `NODE_TYPES` 中 `handles: { source, target }` 控制节点左右两侧的连接点数量（默认 2/2；
-  Host 为 4/4、KeyPair 为 2/4、Interconnect 为 1/8；为支持一对多接入，VPC/Subnet 为 8/2、
+  Host 为 4/8、VM 为 4/2、KeyPair 为 2/4、Interconnect 为 1/8；为支持一对多接入，VPC/Subnet 为 8/2、
   Gateway/LoadBalancer 为 2/8、Instance 为 4/4）；`hidden: true` 的节点类型不会出现在左侧节点库。
 - 画布滚动条 `CanvasScrollbars`（作为 `VueFlow` 插槽子节点，与画布共用同一实例）：
   以「所有节点包围盒 + 边距」为内容区域，横向/纵向滑块拖动即调用 `setViewport` 平移视图，
@@ -131,6 +142,7 @@ OVN-Designer/
 
 ### 云厂商（vendor）
 
+- 工具栏「关联现有实例」打开 `ImportInventoryDialog`：选择当前厂商地域后请求 `GET /api/inventory/:vendor/:region`（前端 `store/inventory.js`，URL 复用 `VITE_CATALOG_API_URL` 的 `{kind}=inventory` 或 `VITE_INVENTORY_API_URL`），将返回的 VPC/子网/实例/安全组/EIP/NAT/密钥对/路由表/负载均衡及关系经 `inventoryLayout.js` 布局到画布。画布非空时先确认覆盖。导入节点带 `data.existing` + `data.cloudId`，节点徽标显示「已有」；导出 Terraform 时 `common.js` 的 `existingDataBlocks` 按厂商生成 data source，新建资源循环跳过这些节点，引用走 data。mock 模式返回示例拓扑便于无凭证联调。
 - 工具栏选择云厂商：`aliyun` / `tencent` / `aws` / `huawei`，存于 `store/vendor.js`，持久化到 localStorage。
 - 工具栏「Provider 版本」输入框对应当前厂商，写入 `provider.tf` 中主 provider 的 `version` 约束
   （如 `~> 5.0` / `>= 1.200.0`）；各厂商版本独立保存于 `store/vendor.js` 的 `providerVersions`，
@@ -264,8 +276,8 @@ OVN-Designer/
 ### OVN 导出（按执行节点拆分）
 
 - `exportOvn(nodes, edges)` 返回 `{ targets, all }`：
-  - `targets` = 按执行位置拆分的命令：`central`（控制节点，ovn-nbctl/ovn-sbctl）+
-    每个 `Host`（各自的 ovs-vsctl 封装命令），各带独立 `content` 与 `filename`。
+  - `targets` = 按执行位置拆分的命令：`central`（控制节点，ovn-nbctl/ovn-sbctl，以及部署在控制节点上的 netns）+
+    每个计算 `Host`（ovs-vsctl 封装命令 + 部署在该节点上的 netns/veth），各带独立 `content` 与 `filename`。
   - `all` = 完整合并脚本 `{ content, filename }`。
 - `ExportModal` 接收 `groups`（分组列表），多组时显示下拉选择查看/下载对应节点的命令。
 

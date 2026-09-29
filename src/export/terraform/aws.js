@@ -1,4 +1,4 @@
-import { createCloudContext, resolveNextHopNode, parsePortRange, resolveVpcRegion, resolveZone, gatewayEips, lbSubnets, lbVpc, lbHealthCheck, instanceLoginAuth, resolveInstanceKeyPair, collectKeyPairs, resolveInterconnects, routeTablesOfVpc, tlsKeyBlocks, hclLines, systemDiskConfig, dataDiskConfigs, gpuUserDataExpr, clean, instanceRef, instanceCount, isCountedInstance, instancePrivateIp, instanceNameExpr, eipCount, eipRef, eipNameExpr, eipInstanceCandidates, eipBindings } from './common.js'
+import { createCloudContext, resolveNextHopNode, parsePortRange, resolveVpcRegion, resolveZone, gatewayEips, lbSubnets, lbVpc, lbHealthCheck, instanceLoginAuth, resolveInstanceKeyPair, collectKeyPairs, resolveInterconnects, routeTablesOfVpc, tlsKeyBlocks, hclLines, systemDiskConfig, dataDiskConfigs, gpuUserDataExpr, clean, instanceRef, instanceCount, isCountedInstance, instancePrivateIp, instanceNameExpr, eipCount, eipRef, eipNameExpr, eipInstanceCandidates, eipBindings, isExisting, existingDataBlocks } from './common.js'
 import { translate } from '../../i18n/index.js'
 import { buildOutputs } from './outputs.js'
 
@@ -69,12 +69,12 @@ function awsProtocol(protocol) {
 }
 
 export function exportAwsTerraform(nodes, edges, providerVersion) {
-  const ctx = createCloudContext(nodes, edges, resourceTypes)
+  const ctx = createCloudContext(nodes, edges, resourceTypes, 'aws')
   const { ref, findVpc, findSubnet } = ctx
   const region = resolveVpcRegion(nodes, 'us-east-1')
-  const blocks = []
+  const blocks = [...existingDataBlocks(ctx, 'aws')]
 
-  for (const vpc of nodes.filter((n) => n.type === 'VPC')) {
+  for (const vpc of nodes.filter((n) => n.type === 'VPC' && !isExisting(n))) {
     blocks.push(`resource "aws_vpc" "${ctx.name(vpc)}" {
   cidr_block = "${vpc.data.cidr}"
 
@@ -84,7 +84,7 @@ export function exportAwsTerraform(nodes, edges, providerVersion) {
 }`)
   }
 
-  for (const sub of nodes.filter((n) => n.type === 'Subnet')) {
+  for (const sub of nodes.filter((n) => n.type === 'Subnet' && !isExisting(n))) {
     const vpc = findVpc(sub)
     const vpcRef = vpc ? ref(vpc) + '.id' : `"" # ${tt('unassociatedVpc')}`
     blocks.push(`resource "aws_subnet" "${ctx.name(sub)}" {
@@ -98,7 +98,7 @@ export function exportAwsTerraform(nodes, edges, providerVersion) {
 }`)
   }
 
-  for (const sg of nodes.filter((n) => n.type === 'SecurityGroup')) {
+  for (const sg of nodes.filter((n) => n.type === 'SecurityGroup' && !isExisting(n))) {
     const vpc = findVpc(sg)
     const vpcRef = vpc ? ref(vpc) + '.id' : `"" # ${tt('unassociatedVpc')}`
     blocks.push(`resource "aws_security_group" "${ctx.name(sg)}" {
@@ -125,7 +125,7 @@ export function exportAwsTerraform(nodes, edges, providerVersion) {
     })
   }
 
-  const eips = nodes.filter((n) => n.type === 'Eip')
+  const eips = nodes.filter((n) => n.type === 'Eip' && !isExisting(n))
   for (const eip of eips) {
     const eipCountLine = isCountedInstance(eip) ? `\n  count = ${eipCount(eip)}` : ''
     blocks.push(`resource "aws_eip" "${ctx.name(eip)}" {${eipCountLine}
@@ -144,7 +144,7 @@ export function exportAwsTerraform(nodes, edges, providerVersion) {
     })
   }
 
-  for (const gw of nodes.filter((n) => n.type === 'Gateway')) {
+  for (const gw of nodes.filter((n) => n.type === 'Gateway' && !isExisting(n))) {
     const sub = findSubnet(gw)
     const vpc = findVpc(gw)
     const vswRef = sub ? ref(sub) + '.id' : `"" # ${tt('unassociatedVswitch')}`
@@ -162,7 +162,7 @@ export function exportAwsTerraform(nodes, edges, providerVersion) {
   }
 
   // 负载均衡：ALB/NLB 实例 + 每个监听规则一个目标组/监听器 + 目标绑定
-  for (const lb of nodes.filter((n) => n.type === 'LoadBalancer')) {
+  for (const lb of nodes.filter((n) => n.type === 'LoadBalancer' && !isExisting(n))) {
     const vpc = lbVpc(ctx, lb)
     const subs = lbSubnets(ctx, lb)
     const rules = lb.data.rules || []
@@ -254,7 +254,7 @@ ${hclLines(rows)}
 ${tlsKeyBlocks(keyName, resName)}`)
   }
 
-  for (const inst of nodes.filter((n) => n.type === 'Instance')) {
+  for (const inst of nodes.filter((n) => n.type === 'Instance' && !isExisting(n))) {
     const sub = findSubnet(inst)
     const vswRef = sub ? ref(sub) + '.id' : `"" # ${tt('unassociatedVswitch')}`
     const sgs = ctx.targetNodes(inst.id).filter((n) => n.type === 'SecurityGroup')
@@ -316,7 +316,7 @@ ${tlsKeyBlocks(keyName, resName)}`)
 }`)
   }
 
-  for (const rt of nodes.filter((n) => n.type === 'RouteTable')) {
+  for (const rt of nodes.filter((n) => n.type === 'RouteTable' && !isExisting(n))) {
     const vpc = findVpc(rt)
     const vpcRef = vpc ? ref(vpc) + '.id' : `"" # ${tt('unassociatedVpc')}`
     blocks.push(`resource "aws_route_table" "${ctx.name(rt)}" {

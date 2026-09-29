@@ -96,7 +96,7 @@ func (h *Handler) listVendors(c *gin.Context) {
 	sort.Strings(names)
 	c.JSON(http.StatusOK, gin.H{
 		"vendors": names,
-		"kinds":   []string{"images", "instanceTypes", "gpuImages", "gpuInstanceTypes"},
+		"kinds":   []string{"images", "instanceTypes", "gpuImages", "gpuInstanceTypes", "inventory"},
 	})
 }
 

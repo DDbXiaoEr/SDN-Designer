@@ -6,8 +6,81 @@ export function resolveVpcRegion(nodes, fallback) {
   return vpc ? vpc.data.region : fallback
 }
 
+// 从云上导入的已有资源：导出为 data source，不再创建
+export function isExisting(node) {
+  return !!(node && node.data && node.data.existing && String(node.data.cloudId || '').trim())
+}
+
+export function existingId(node) {
+  return isExisting(node) ? String(node.data.cloudId).trim() : ''
+}
+
+// 各厂商按节点类型查询已有资源的 data source（参数 + 引用前缀，不含 .id）
+const DATA_SOURCES = {
+  aliyun: {
+    VPC: { type: 'alicloud_vpc', rows: (id) => [['id', `"${id}"`]], ref: (n) => `data.alicloud_vpc.${n}` },
+    Subnet: { type: 'alicloud_vswitch', rows: (id) => [['id', `"${id}"`]], ref: (n) => `data.alicloud_vswitch.${n}` },
+    Instance: { type: 'alicloud_instances', rows: (id) => [['ids', `["${id}"]`]], ref: (n) => `data.alicloud_instances.${n}.instances.0` },
+    SecurityGroup: { type: 'alicloud_security_group', rows: (id) => [['id', `"${id}"`]], ref: (n) => `data.alicloud_security_group.${n}` },
+    Eip: { type: 'alicloud_eips', rows: (id) => [['ids', `["${id}"]`]], ref: (n) => `data.alicloud_eips.${n}.eips.0` },
+    Gateway: { type: 'alicloud_nat_gateways', rows: (id) => [['ids', `["${id}"]`]], ref: (n) => `data.alicloud_nat_gateways.${n}.nat_gateways.0` },
+    RouteTable: { type: 'alicloud_route_tables', rows: (id) => [['ids', `["${id}"]`]], ref: (n) => `data.alicloud_route_tables.${n}.tables.0` },
+    LoadBalancer: { type: 'alicloud_slbs', rows: (id) => [['ids', `["${id}"]`]], ref: (n) => `data.alicloud_slbs.${n}.slbs.0` },
+  },
+  tencent: {
+    VPC: { type: 'tencentcloud_vpc_instances', rows: (id) => [['vpc_id', `"${id}"`]], ref: (n) => `data.tencentcloud_vpc_instances.${n}.instance_list.0` },
+    Subnet: { type: 'tencentcloud_vpc_subnets', rows: (id) => [['subnet_id', `"${id}"`]], ref: (n) => `data.tencentcloud_vpc_subnets.${n}.instance_list.0` },
+    Instance: { type: 'tencentcloud_instances', rows: (id) => [['instance_ids', `["${id}"]`]], ref: (n) => `data.tencentcloud_instances.${n}.instance_list.0` },
+    SecurityGroup: { type: 'tencentcloud_security_groups', rows: (id) => [['security_group_id', `"${id}"`]], ref: (n) => `data.tencentcloud_security_groups.${n}.security_groups.0` },
+    Eip: { type: 'tencentcloud_eips', rows: (id) => [['eip_id', `"${id}"`]], ref: (n) => `data.tencentcloud_eips.${n}.eip_list.0` },
+    Gateway: { type: 'tencentcloud_nat_gateways', rows: (id) => [['id', `"${id}"`]], ref: (n) => `data.tencentcloud_nat_gateways.${n}.nat_gateways.0` },
+    RouteTable: { type: 'tencentcloud_route_table', rows: (id) => [['route_table_id', `"${id}"`]], ref: (n) => `data.tencentcloud_route_table.${n}` },
+    LoadBalancer: { type: 'tencentcloud_clb_instances', rows: (id) => [['clb_id', `"${id}"`]], ref: (n) => `data.tencentcloud_clb_instances.${n}.clb_list.0` },
+  },
+  aws: {
+    VPC: { type: 'aws_vpc', rows: (id) => [['id', `"${id}"`]], ref: (n) => `data.aws_vpc.${n}` },
+    Subnet: { type: 'aws_subnet', rows: (id) => [['id', `"${id}"`]], ref: (n) => `data.aws_subnet.${n}` },
+    Instance: { type: 'aws_instance', rows: (id) => [['instance_id', `"${id}"`]], ref: (n) => `data.aws_instance.${n}` },
+    SecurityGroup: { type: 'aws_security_group', rows: (id) => [['id', `"${id}"`]], ref: (n) => `data.aws_security_group.${n}` },
+    Eip: { type: 'aws_eip', rows: (id) => [['id', `"${id}"`]], ref: (n) => `data.aws_eip.${n}` },
+    Gateway: { type: 'aws_nat_gateway', rows: (id) => [['id', `"${id}"`]], ref: (n) => `data.aws_nat_gateway.${n}` },
+    RouteTable: { type: 'aws_route_table', rows: (id) => [['route_table_id', `"${id}"`]], ref: (n) => `data.aws_route_table.${n}` },
+    LoadBalancer: { type: 'aws_lb', rows: (id) => [['arn', `"${id}"`]], ref: (n) => `data.aws_lb.${n}` },
+  },
+  huawei: {
+    VPC: { type: 'huaweicloud_vpc', rows: (id) => [['id', `"${id}"`]], ref: (n) => `data.huaweicloud_vpc.${n}` },
+    Subnet: { type: 'huaweicloud_vpc_subnet', rows: (id) => [['id', `"${id}"`]], ref: (n) => `data.huaweicloud_vpc_subnet.${n}` },
+    Instance: { type: 'huaweicloud_compute_instance', rows: (id) => [['instance_id', `"${id}"`]], ref: (n) => `data.huaweicloud_compute_instance.${n}` },
+    SecurityGroup: { type: 'huaweicloud_networking_secgroup', rows: (id) => [['secgroup_id', `"${id}"`]], ref: (n) => `data.huaweicloud_networking_secgroup.${n}` },
+    Eip: { type: 'huaweicloud_vpc_eip', rows: (id) => [['publicip_id', `"${id}"`]], ref: (n) => `data.huaweicloud_vpc_eip.${n}` },
+    Gateway: { type: 'huaweicloud_nat_gateway', rows: (id) => [['id', `"${id}"`]], ref: (n) => `data.huaweicloud_nat_gateway.${n}` },
+    RouteTable: { type: 'huaweicloud_vpc_route_table', rows: (id) => [['id', `"${id}"`]], ref: (n) => `data.huaweicloud_vpc_route_table.${n}` },
+    LoadBalancer: { type: 'huaweicloud_elb_loadbalancer', rows: (id) => [['loadbalancer_id', `"${id}"`]], ref: (n) => `data.huaweicloud_elb_loadbalancer.${n}` },
+  },
+}
+
+export function dataSourceSpec(vendor, node) {
+  if (!isExisting(node)) return null
+  const map = DATA_SOURCES[vendor] || DATA_SOURCES.aliyun
+  return map[node.type] || null
+}
+
+// 为已有资源生成 data 块；引用走 ctx.ref（已指向 data source）
+export function existingDataBlocks(ctx, vendor) {
+  const blocks = []
+  for (const node of ctx.nodes) {
+    const spec = dataSourceSpec(vendor, node)
+    if (!spec) continue
+    const id = existingId(node)
+    const n = ctx.name(node)
+    if (!id || !n) continue
+    blocks.push(`data "${spec.type}" "${n}" {\n${hclLines(spec.rows(id))}\n}`)
+  }
+  return blocks
+}
+
 // 云资源导出共享上下文：资源唯一命名、引用解析、VPC/子网归属
-export function createCloudContext(nodes, edges, resourceTypes) {
+export function createCloudContext(nodes, edges, resourceTypes, vendor) {
   const { byId, sourceNodes, targetNodes } = buildGraph(nodes, edges)
 
   const resourceNames = new Map()
@@ -25,6 +98,8 @@ export function createCloudContext(nodes, edges, resourceTypes) {
   const name = (node) => resourceNames.get(node.id)
 
   const ref = (node) => {
+    const spec = vendor ? dataSourceSpec(vendor, node) : null
+    if (spec) return spec.ref(name(node))
     const type = node.type
     if (type === 'Subnet') return `${resourceTypes.subnet}.${name(node)}`
     if (type === 'VPC') return `${resourceTypes.vpc}.${name(node)}`

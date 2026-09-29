@@ -147,10 +147,10 @@ export function slug(str) {
     .replace(/[^a-zA-Z0-9_-]/g, '_')
 }
 
-// 计算区域（zone）：Host 节点通过隧道连线形成的连通分量
+// 计算区域（zone）：计算 Host 通过隧道连线形成的连通分量（控制节点不参与）
 // 返回 host node id 的连通分量数组
 export function computeZones(nodes, edges) {
-  const hostIds = nodes.filter((n) => n.type === 'Host').map((n) => n.id)
+  const hostIds = nodes.filter((n) => n.type === 'Host' && !n.data?.controller).map((n) => n.id)
   const hostSet = new Set(hostIds)
   const adj = new Map(hostIds.map((id) => [id, []]))
   for (const e of edges) {

@@ -12,7 +12,7 @@ defineProps({
   nodesCount: { type: Number, default: 0 },
 })
 
-const emit = defineEmits(['export-ovn', 'export-terraform', 'clear', 'save-design', 'import-design', 'load-demo', 'change-vendor'])
+const emit = defineEmits(['export-ovn', 'export-terraform', 'clear', 'save-design', 'import-design', 'import-inventory', 'load-demo', 'change-vendor'])
 
 const { t, locale } = useI18n()
 
@@ -87,6 +87,7 @@ function onProviderVersionChange(value) {
       <button class="ghost" @click="emit('clear')">{{ t('toolbar.clear') }}</button>
       <button class="ghost" @click="emit('save-design')">{{ t('toolbar.saveDesign') }}</button>
       <button class="ghost" @click="emit('import-design')">{{ t('toolbar.importDesign') }}</button>
+      <button class="ghost" @click="emit('import-inventory')">{{ t('toolbar.importInventory') }}</button>
       <span class="divider" aria-hidden="true" />
       <button class="ovn" @click="emit('export-ovn')">{{ t('toolbar.exportOvn') }}</button>
       <button class="cloud" @click="emit('export-terraform')">{{ t('toolbar.exportTerraform') }}</button>

@@ -4,8 +4,9 @@ English | [中文](./README.md)
 
 A Go + Gin cloud vendor catalog proxy: fetches **images** and **instance types** by region
 (including GPU instance types and related images; Tencent Cloud additionally returns the zones
-in stock), normalizes them into JSON and returns them to the frontend, where
-`src/store/catalog.js` consumes them via `VITE_CATALOG_API_URL`.
+in stock), as well as the **existing-resource graph** in that region (instances and related
+VPC/subnet/security group/EIP relationships). Images/types are consumed by `src/store/catalog.js`
+via `VITE_CATALOG_API_URL`; inventory is used by “Link existing instances” with `{kind}=inventory`.
 
 ## Why a backend is needed
 
@@ -21,14 +22,35 @@ leaking credentials, so this service signs and normalizes the calls on the front
 | GET | `/api/vendors` | Supported vendors and kinds |
 | GET | `/api/:kind/:vendor` | Uses the vendor's default region, or specify via `?region=` |
 | GET | `/api/:kind/:vendor/:region` | Specify the region |
+| GET | `/api/inventory/:vendor` | Existing-resource graph in the default region, or specify via `?region=` |
+| GET | `/api/inventory/:vendor/:region` | Existing-resource graph in the given region |
 | GET | `/api/providerVersions` | Published Terraform provider versions per vendor (fetched from the Registry) |
 | GET | `/api/providerVersions/:vendor` | Published versions for a single vendor |
 
-- `kind`: `images` / `instanceTypes` (full lists) or `gpuImages` / `gpuInstanceTypes` (GPU-only)
+- `kind`: `images` / `instanceTypes` (full lists) or `gpuImages` / `gpuInstanceTypes` (GPU-only); inventory uses `/api/inventory/...`
 - `vendor`: `tencent` / `aliyun` / `aws` / `huawei`
 
 `gpuImages` / `gpuInstanceTypes` share the cache of the corresponding full list and are filtered
 server-side by the `gpu` flag.
+
+Inventory response (empty lists may be omitted):
+
+```json
+{
+  "vendor": "aliyun",
+  "region": "cn-hangzhou",
+  "vpcs": [{ "id": "vpc-xxx", "name": "vpc-demo", "cidr": "10.0.0.0/16" }],
+  "subnets": [{ "id": "vsw-xxx", "name": "subnet-demo", "cidr": "10.0.1.0/24", "zone": "cn-hangzhou-b", "vpcId": "vpc-xxx" }],
+  "instances": [{
+    "id": "i-xxx", "name": "ecs-demo", "vpcId": "vpc-xxx", "subnetId": "vsw-xxx",
+    "securityGroupIds": ["sg-xxx"], "keyPair": "kp-demo"
+  }],
+  "securityGroups": [],
+  "eips": [],
+  "gateways": [],
+  "keyPairs": [{ "name": "kp-demo" }]
+}
+```
 
 Response:
 

@@ -3,7 +3,8 @@
 [English](./README.en.md) | 中文
 
 Go + Gin 实现的云厂商清单代理：按地域拉取**镜像**与**实例规格**（含 GPU 规格与相关镜像，腾讯云额外返回有货可用区），
-以规范化 JSON 返回给前端，供 `src/store/catalog.js` 通过 `VITE_CATALOG_API_URL` 使用。
+以及该地域下**已有云资源拓扑**（实例及其 VPC/子网/安全组/EIP 等关系），以规范化 JSON 返回给前端。
+镜像/规格供 `src/store/catalog.js` 通过 `VITE_CATALOG_API_URL` 使用；库存供「关联现有实例」通过同一 URL 的 `kind=inventory` 使用。
 
 ## 为什么需要后端
 
@@ -18,13 +19,37 @@ Go + Gin 实现的云厂商清单代理：按地域拉取**镜像**与**实例�
 | GET | `/api/vendors` | 支持的厂商与 kind |
 | GET | `/api/:kind/:vendor` | 使用厂商默认地域，或用 `?region=` 指定 |
 | GET | `/api/:kind/:vendor/:region` | 指定地域 |
+| GET | `/api/inventory/:vendor` | 默认地域的已有资源拓扑，或用 `?region=` 指定 |
+| GET | `/api/inventory/:vendor/:region` | 指定地域的已有资源拓扑 |
 | GET | `/api/providerVersions` | 各厂商 Terraform provider 已发布版本（从 Registry 拉取） |
 | GET | `/api/providerVersions/:vendor` | 单个厂商的已发布版本 |
 
-- `kind`：`images` / `instanceTypes`（全量）或 `gpuImages` / `gpuInstanceTypes`（仅 GPU）
+- `kind`：`images` / `instanceTypes`（全量）或 `gpuImages` / `gpuInstanceTypes`（仅 GPU）；库存走独立路径 `/api/inventory/...`
 - `vendor`：`tencent` / `aliyun` / `aws` / `huawei`
 
 `gpuImages` / `gpuInstanceTypes` 与对应全量清单共用缓存，服务端按 `gpu` 字段过滤后返回。
+
+库存响应（字段按实际资源裁剪，空列表可省略）：
+
+```json
+{
+  "vendor": "aliyun",
+  "region": "cn-hangzhou",
+  "vpcs": [{ "id": "vpc-xxx", "name": "vpc-demo", "cidr": "10.0.0.0/16" }],
+  "subnets": [{ "id": "vsw-xxx", "name": "subnet-demo", "cidr": "10.0.1.0/24", "zone": "cn-hangzhou-b", "vpcId": "vpc-xxx" }],
+  "instances": [{
+    "id": "i-xxx", "name": "ecs-demo", "imageId": "...", "instanceType": "ecs.g7.large",
+    "chargeType": "payAsYouGo", "privateIp": "10.0.1.10", "zone": "cn-hangzhou-b",
+    "vpcId": "vpc-xxx", "subnetId": "vsw-xxx", "securityGroupIds": ["sg-xxx"], "keyPair": "kp-demo"
+  }],
+  "securityGroups": [{ "id": "sg-xxx", "name": "sg-demo", "vpcId": "vpc-xxx", "rules": [] }],
+  "eips": [{ "id": "eip-xxx", "name": "eip-demo", "instanceId": "i-xxx", "bandwidth": 5 }],
+  "gateways": [{ "id": "ngw-xxx", "name": "nat-demo", "vpcId": "vpc-xxx" }],
+  "keyPairs": [{ "name": "kp-demo" }],
+  "routeTables": [],
+  "loadBalancers": []
+}
+```
 
 响应：
 

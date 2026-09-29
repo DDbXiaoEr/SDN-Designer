@@ -47,9 +47,9 @@ watch(
 
 <style scoped>
 .messages {
-  flex-shrink: 0;
+  flex: 1;
+  min-width: 0;
   background: var(--surface);
-  border-top: 1px solid var(--rule);
 }
 .messages-head {
   display: flex;

@@ -11,9 +11,10 @@ A pure-frontend, drag-and-drop virtual network designer. Visually build virtual 
 ## Features
 
 - 🖱️ Drag-and-drop canvas: drag nodes from the library, connect them by dragging handles, with zoom, pan and minimap.
+- 🔗 Link existing instances: pick a region in the toolbar, fetch live instances and related VPC/subnet/security group/EIP resources, and draw them on the canvas; existing resources export as Terraform data sources.
 - 🧭 Built-in demo: the example topology (VPC + subnet + ECS + security group + EIP + key pair) loads automatically on first visit; reload it anytime via "Load demo" in the toolbar.
-- 🔀 Connection validation: only legal network relationships are allowed (e.g. VM attached to a logical switch, VPC containing a subnet).
-- 🖥️ OVN logical network: logical switch / logical router / VM / host (Chassis, with configurable NICs and tunnel encapsulation).
+- 🔀 Connection validation: only legal network relationships are allowed (e.g. VM attached to a logical switch and deployed to a host, VPC containing a subnet).
+- 🖥️ OVN logical network: logical switch / logical router / VM (netns) / host (Chassis, with configurable NICs and tunnel encapsulation).
 - ☁️ Multi-cloud resources: switch between Alibaba Cloud / Tencent Cloud / AWS / Huawei Cloud, covering VPC / subnet / gateway / EIP / security group / instance / route table / key pair.
 - 🔗 Multi-VPC interconnect: drag a "VPC Peering" node and connect multiple VPCs; on export it generates pairwise peerings and auto-fills routes in each VPC's route table.
 - 🧩 Instance config: image and instance type as "dropdown + free input" controls (local built-in list merged with online lists, custom values allowed), plus billing method, system / data disks (type, size) and login auth; checking "Deploy GPU instance" switches to GPU types/images and driver install.
@@ -45,14 +46,15 @@ npm run preview # preview production build
    - Instances support system / data disks; use "Export Outputs" to check attributes only known after creation (resource ID, public IP, ...).
    - Dragging in a "Host" first opens a creation dialog where you must fill in the node name and NIC info (you can check the tunnel encapsulation NIC).
 5. Bind a key pair: connect an instance to a "Key Pair" node and pick "Create new key pair" or "Use existing key pair" in its properties.
-6. Click "Export OVN commands" or "Export Terraform" in the toolbar to view and copy / download the result (an extra `output.tf` appears when outputs are checked).
+6. Link existing instances: click "Link existing instances" in the toolbar, pick a region and fetch, then draw on the canvas (replaces the current design). On Terraform export these nodes become data sources and are not recreated.
+7. Click "Export OVN commands" or "Export Terraform" in the toolbar to view and copy / download the result (an extra `output.tf` appears when outputs are checked).
 
 ### Building a logical network across physical nodes
 
-1. Drag in multiple "Host" nodes and connect them pairwise (tunnel interconnect) to form a "zone".
+1. Drag in multiple "Host" nodes; interconnect the compute hosts (tunnel) to form a cluster, mark one as the control node, then connect the cluster to the control node (join the control plane).
 2. Drag in a "Logical Switch" and connect it to any host in the zone (deploy to node).
-3. Drag in "VM" nodes and connect them to the logical switch.
-4. Export the OVN commands; the script generates tunnel encapsulation config for all hosts in the zone and annotates the switch's deployment scope.
+3. Drag in "VM" nodes, connect them to the logical switch (attach port), then to a host (deploy as a netns on that node).
+4. Export the OVN commands; the script generates tunnel encapsulation config, sets `requested-chassis` for each VM, and creates the netns / veth on the target host.
 
 ## Supported Nodes
 
@@ -61,7 +63,7 @@ npm run preview # preview production build
 | OVN | Logical Switch | Layer-2 broadcast domain with a subnet CIDR |
 | OVN | Logical Router | Layer-3 forwarding, can be marked external |
 | OVN | Host Chassis | Physical node with multiple NICs + tunnel encapsulation |
-| OVN | VM | Logical port with IP / MAC |
+| OVN | VM (netns) | Logical port plus a network namespace on the host, with IP / MAC |
 | Cloud | VPC | VPC CIDR block |
 | Cloud | VSwitch | Subnet within a VPC + availability zone |
 | Cloud | Gateway | NAT gateway |

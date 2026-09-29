@@ -16,6 +16,7 @@ import (
 
 	"ovndesigner/server/internal/catalog"
 	"ovndesigner/server/internal/config"
+	"ovndesigner/server/internal/inventory"
 	"ovndesigner/server/internal/provider"
 	"ovndesigner/server/internal/tfversion"
 )
@@ -25,6 +26,8 @@ func main() {
 
 	providers := provider.Build(cfg)
 	handler := catalog.NewHandler(providers, cfg.CacheTTL)
+	// 已有资源库存（须先于 catalog 的 /api/:kind 注册，避免 kind=inventory 冲突）
+	invHandler := inventory.NewHandler(providers, cfg.CacheTTL)
 	// Terraform provider 版本清单（公开 Registry，无需凭证，mock 模式返回示例）
 	tfVersions := tfversion.NewHandler(cfg.RegistryURL, cfg.CacheTTL, cfg.RequestTimeout, cfg.Mock)
 
@@ -40,6 +43,7 @@ func main() {
 			"mock":    cfg.Mock,
 		})
 	})
+	invHandler.Register(r)
 	handler.Register(r)
 	tfVersions.Register(r)
 

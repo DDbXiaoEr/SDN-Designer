@@ -49,7 +49,8 @@ export const NODE_TYPES = {
     category: 'ovn',
     label: 'nodes.host',
     badge: 'HOST',
-    handles: { source: 4, target: 4 },
+    // 隧道互联 + 交换机部署 + 多台 VM(netns) 接入，target 侧留足
+    handles: { source: 4, target: 8 },
     defaults: () => ({
       name: 'host1',
       encapType: 'geneve',
@@ -83,6 +84,7 @@ export const NODE_TYPES = {
     label: 'nodes.cluster',
     badge: 'CLUSTER',
     hidden: true,
+    handles: { source: 2, target: 2 },
     defaults: () => ({
       name: 'cluster1',
       hostCount: 0,
@@ -94,6 +96,8 @@ export const NODE_TYPES = {
     category: 'ovn',
     label: 'nodes.vm',
     badge: 'VM',
+    // 需同时挂逻辑交换机、部署到宿主机
+    handles: { source: 4, target: 2 },
     defaults: () => ({
       name: 'vm1',
       ip: '10.0.0.2',
@@ -407,11 +411,13 @@ export const NODE_TYPES = {
 // 连接规则：source 类型 -> target 类型，带关系标签（i18n key）
 export const CONNECTION_RULES = [
   { source: 'VM', target: 'LogicalSwitch', label: 'connections.vmToSwitch' },
+  { source: 'VM', target: 'Host', label: 'connections.vmToHost' },
   { source: 'LogicalSwitch', target: 'LogicalRouter', label: 'connections.switchToRouter' },
   { source: 'LogicalRouter', target: 'LogicalSwitch', label: 'connections.routerToSwitch' },
   { source: 'Host', target: 'Host', label: 'connections.hostToHost' },
   { source: 'LogicalSwitch', target: 'Host', label: 'connections.switchToHost' },
   { source: 'VPC', target: 'Cluster', label: 'connections.vpcToCluster' },
+  { source: 'Cluster', target: 'Host', label: 'connections.clusterToController' },
   { source: 'VPC', target: 'Subnet', label: 'connections.vpcToSubnet' },
   { source: 'Subnet', target: 'Instance', label: 'connections.subnetToInstance' },
   { source: 'Instance', target: 'SecurityGroup', label: 'connections.instanceToSg' },
@@ -433,4 +439,57 @@ export function canConnect(sourceType, targetType) {
   return CONNECTION_RULES.find(
     (r) => r.source === sourceType && r.target === targetType
   )
+}
+
+export function isControllerHost(node) {
+  return !!(node && node.type === 'Host' && node.data && node.data.controller)
+}
+
+// 计算节点之间的隧道互联才会归并为 Cluster；与控制节点的连线不参与
+export function isComputeTunnel(source, target) {
+  return !!(
+    source &&
+    target &&
+    source.type === 'Host' &&
+    target.type === 'Host' &&
+    !isControllerHost(source) &&
+    !isControllerHost(target)
+  )
+}
+
+// 控制面：拖线双向都允许，落边统一成「集群/计算节点 → 控制节点」（箭头指向控制节点）
+export function resolveConnection(source, target) {
+  if (!source || !target) return null
+  if (
+    (source.type === 'Cluster' && target.type === 'Host' && isControllerHost(target)) ||
+    (source.type === 'Host' && isControllerHost(source) && target.type === 'Cluster')
+  ) {
+    return { source: 'Cluster', target: 'Host', label: 'connections.clusterToController' }
+  }
+  if (source.type === 'Host' && target.type === 'Host') {
+    if (isControllerHost(source) && isControllerHost(target)) return null
+    if (isControllerHost(source) || isControllerHost(target)) {
+      return { source: 'Host', target: 'Host', label: 'connections.hostToController' }
+    }
+  }
+  return canConnect(source.type, target.type) || null
+}
+
+function isJoinerToController(from, to) {
+  if (!from || !to || !isControllerHost(to)) return false
+  if (from.type === 'Cluster') return true
+  return from.type === 'Host' && !isControllerHost(from)
+}
+
+// 落边/加载时统一成接入方 → 控制节点，连接点随端点对调
+export function orientControlPlaneConnection(source, target, conn) {
+  if (isJoinerToController(source, target)) return conn
+  if (!isJoinerToController(target, source)) return conn
+  return {
+    ...conn,
+    source: conn.target,
+    target: conn.source,
+    sourceHandle: conn.targetHandle,
+    targetHandle: conn.sourceHandle,
+  }
 }

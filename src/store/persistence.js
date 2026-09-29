@@ -1,5 +1,7 @@
 // 设计文件序列化 / 反序列化，以及 localStorage 持久化
 
+import { orientControlPlaneConnection } from '../data/nodeDefinitions.js'
+
 const STORAGE_KEY = 'ovn-designer-design'
 
 function sanitizeNode(n) {
@@ -38,7 +40,12 @@ export function deserializeDesign(json) {
   if (!data || !Array.isArray(data.nodes) || !Array.isArray(data.edges)) {
     throw new Error('invalid design file')
   }
-  return { nodes: data.nodes, edges: data.edges }
+  const nodes = data.nodes
+  const byId = new Map(nodes.map((n) => [n.id, n]))
+  const edges = data.edges.map((e) =>
+    orientControlPlaneConnection(byId.get(e.source), byId.get(e.target), e)
+  )
+  return { nodes, edges }
 }
 
 export function saveToStorage(nodes, edges) {

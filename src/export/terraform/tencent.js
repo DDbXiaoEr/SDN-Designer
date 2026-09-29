@@ -1,4 +1,4 @@
-import { createCloudContext, resolveNextHopNode, parsePortRange, resolveVpcRegion, resolveZone, gatewayEips, gatewaySnatSources, vpcSubnets, lbSubnets, lbVpc, lbHealthCheck, lbBackendInstances, instanceLoginAuth, resolveInstanceKeyPair, collectKeyPairs, collectExistingKeyPairs, escapeRegex, resolveInterconnects, routeTablesOfVpc, tlsKeyBlocks, hclLines, systemDiskConfig, dataDiskConfigs, gpuUserDataExpr, clean, instanceRef, instanceCount, isCountedInstance, instancePrivateIp, instancePrivateIpAt, instanceNameExpr, eipCount, eipRef, eipNameExpr, eipInstanceCandidates, eipBindings } from './common.js'
+import { createCloudContext, resolveNextHopNode, parsePortRange, resolveVpcRegion, resolveZone, gatewayEips, gatewaySnatSources, vpcSubnets, lbSubnets, lbVpc, lbHealthCheck, lbBackendInstances, instanceLoginAuth, resolveInstanceKeyPair, collectKeyPairs, collectExistingKeyPairs, escapeRegex, resolveInterconnects, routeTablesOfVpc, tlsKeyBlocks, hclLines, systemDiskConfig, dataDiskConfigs, gpuUserDataExpr, clean, instanceRef, instanceCount, isCountedInstance, instancePrivateIp, instancePrivateIpAt, instanceNameExpr, eipCount, eipRef, eipNameExpr, eipInstanceCandidates, eipBindings, isExisting, existingDataBlocks } from './common.js'
 import { translate } from '../../i18n/index.js'
 import { buildOutputs } from './outputs.js'
 
@@ -266,19 +266,19 @@ function exportTencentLoadBalancer(ctx, lb, blocks) {
 }
 
 export function exportTencentTerraform(nodes, edges, providerVersion) {
-  const ctx = createCloudContext(nodes, edges, resourceTypes)
+  const ctx = createCloudContext(nodes, edges, resourceTypes, 'tencent')
   const { ref, findVpc, findSubnet } = ctx
   const region = resolveVpcRegion(nodes, 'ap-guangzhou')
-  const blocks = []
+  const blocks = [...existingDataBlocks(ctx, 'tencent')]
 
-  for (const vpc of nodes.filter((n) => n.type === 'VPC')) {
+  for (const vpc of nodes.filter((n) => n.type === 'VPC' && !isExisting(n))) {
     blocks.push(`resource "tencentcloud_vpc" "${ctx.name(vpc)}" {
   name       = "${clean(vpc.data.name)}"
   cidr_block = "${vpc.data.cidr}"
 }`)
   }
 
-  for (const sub of nodes.filter((n) => n.type === 'Subnet')) {
+  for (const sub of nodes.filter((n) => n.type === 'Subnet' && !isExisting(n))) {
     const vpc = findVpc(sub)
     const vpcRef = vpc ? ref(vpc) + '.id' : `"" # ${tt('unassociatedVpc')}`
     blocks.push(`resource "tencentcloud_subnet" "${ctx.name(sub)}" {
@@ -289,7 +289,7 @@ export function exportTencentTerraform(nodes, edges, providerVersion) {
 }`)
   }
 
-  for (const sg of nodes.filter((n) => n.type === 'SecurityGroup')) {
+  for (const sg of nodes.filter((n) => n.type === 'SecurityGroup' && !isExisting(n))) {
     blocks.push(`resource "tencentcloud_security_group" "${ctx.name(sg)}" {
   name = "${clean(sg.data.name)}"
 }`)
@@ -307,7 +307,7 @@ export function exportTencentTerraform(nodes, edges, providerVersion) {
     })
   }
 
-  for (const eip of nodes.filter((n) => n.type === 'Eip')) {
+  for (const eip of nodes.filter((n) => n.type === 'Eip' && !isExisting(n))) {
     const internetChargeType =
       eip.data.internetChargeType === 'payByBandwidth'
         ? 'BANDWIDTH_POSTPAID_BY_HOUR'
@@ -333,7 +333,7 @@ ${hclLines(eipRows)}
   }
 
   let snatSeq = 0 // SNAT 规则资源名后缀，保证多个网关/子网组合唯一
-  for (const gw of nodes.filter((n) => n.type === 'Gateway')) {
+  for (const gw of nodes.filter((n) => n.type === 'Gateway' && !isExisting(n))) {
     const vpc = findVpc(gw)
     const vpcRef = vpc ? ref(vpc) + '.id' : `"" # ${tt('unassociatedVpc')}`
     const eips = gatewayEips(ctx, gw)
@@ -386,7 +386,7 @@ ${hclLines(eipRows)}
   }
 
   // 负载均衡：按 lbConfig.type 生成 CLB/GWLB 对应资源（ALB 暂不支持 Terraform）
-  for (const lb of nodes.filter((n) => n.type === 'LoadBalancer')) {
+  for (const lb of nodes.filter((n) => n.type === 'LoadBalancer' && !isExisting(n))) {
     exportTencentLoadBalancer(ctx, lb, blocks)
   }
 
@@ -408,7 +408,7 @@ ${tlsKeyBlocks(keyName, resName)}`)
 }`)
   }
 
-  for (const inst of nodes.filter((n) => n.type === 'Instance')) {
+  for (const inst of nodes.filter((n) => n.type === 'Instance' && !isExisting(n))) {
     const sub = findSubnet(inst)
     const vpc = findVpc(inst)
     const vpcRef = vpc ? ref(vpc) + '.id' : `"" # ${tt('unassociatedVpc')}`
@@ -471,7 +471,7 @@ ${hclLines(rows)}${dataDiskBlock}
 }`)
   }
 
-  for (const rt of nodes.filter((n) => n.type === 'RouteTable')) {
+  for (const rt of nodes.filter((n) => n.type === 'RouteTable' && !isExisting(n))) {
     const vpc = findVpc(rt)
     const vpcRef = vpc ? ref(vpc) + '.id' : `"" # ${tt('unassociatedVpc')}`
     blocks.push(`resource "tencentcloud_route_table" "${ctx.name(rt)}" {

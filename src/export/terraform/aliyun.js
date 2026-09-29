@@ -1,4 +1,4 @@
-import { createCloudContext, resolveNextHopNode, resolveVpcRegion, resolveZone, gatewayEips, gatewaySnatSources, lbSubnets, lbVpc, lbHealthCheck, lbBackendInstances, instanceLoginAuth, resolveInstanceKeyPair, collectKeyPairs, resolveInterconnects, routeTablesOfVpc, hclLines, systemDiskConfig, dataDiskConfigs, gpuUserDataExpr, clean, instanceRef, instanceCount, isCountedInstance, instancePrivateIp, instancePrivateIpAt, instanceNameExpr, eipCount, eipRef, eipNameExpr, eipInstanceCandidates, eipBindings } from './common.js'
+import { createCloudContext, resolveNextHopNode, resolveVpcRegion, resolveZone, gatewayEips, gatewaySnatSources, lbSubnets, lbVpc, lbHealthCheck, lbBackendInstances, instanceLoginAuth, resolveInstanceKeyPair, collectKeyPairs, resolveInterconnects, routeTablesOfVpc, hclLines, systemDiskConfig, dataDiskConfigs, gpuUserDataExpr, clean, instanceRef, instanceCount, isCountedInstance, instancePrivateIp, instancePrivateIpAt, instanceNameExpr, eipCount, eipRef, eipNameExpr, eipInstanceCandidates, eipBindings, isExisting, existingDataBlocks } from './common.js'
 import { translate } from '../../i18n/index.js'
 import { buildOutputs } from './outputs.js'
 
@@ -452,19 +452,19 @@ function exportAliyunLoadBalancer(ctx, lb, region, blocks) {
 
 
 export function exportAliyunTerraform(nodes, edges, providerVersion) {
-  const ctx = createCloudContext(nodes, edges, resourceTypes)
+  const ctx = createCloudContext(nodes, edges, resourceTypes, 'aliyun')
   const { ref, findVpc, findSubnet } = ctx
   const region = resolveVpcRegion(nodes, 'cn-hangzhou')
-  const blocks = []
+  const blocks = [...existingDataBlocks(ctx, 'aliyun')]
 
-  for (const vpc of nodes.filter((n) => n.type === 'VPC')) {
+  for (const vpc of nodes.filter((n) => n.type === 'VPC' && !isExisting(n))) {
     blocks.push(`resource "alicloud_vpc" "${ctx.name(vpc)}" {
   vpc_name   = "${clean(vpc.data.name)}"
   cidr_block = "${vpc.data.cidr}"
 }`)
   }
 
-  for (const sub of nodes.filter((n) => n.type === 'Subnet')) {
+  for (const sub of nodes.filter((n) => n.type === 'Subnet' && !isExisting(n))) {
     const vpc = findVpc(sub)
     const vpcRef = vpc ? ref(vpc) + '.id' : `"" # ${tt('unassociatedVpc')}`
     blocks.push(`resource "alicloud_vswitch" "${ctx.name(sub)}" {
@@ -475,7 +475,7 @@ export function exportAliyunTerraform(nodes, edges, providerVersion) {
 }`)
   }
 
-  for (const sg of nodes.filter((n) => n.type === 'SecurityGroup')) {
+  for (const sg of nodes.filter((n) => n.type === 'SecurityGroup' && !isExisting(n))) {
     const vpc = findVpc(sg)
     const vpcRef = vpc ? ref(vpc) + '.id' : `"" # ${tt('unassociatedVpc')}`
     blocks.push(`resource "alicloud_security_group" "${ctx.name(sg)}" {
@@ -497,7 +497,7 @@ export function exportAliyunTerraform(nodes, edges, providerVersion) {
   }
 
   let snatSeq = 0 // SNAT 条目的资源名后缀，保证多个网关/子网组合唯一
-  for (const gw of nodes.filter((n) => n.type === 'Gateway')) {
+  for (const gw of nodes.filter((n) => n.type === 'Gateway' && !isExisting(n))) {
     const sub = findSubnet(gw)
     const vpc = findVpc(gw)
     const vpcRef = vpc ? ref(vpc) + '.id' : '""'
@@ -544,7 +544,7 @@ export function exportAliyunTerraform(nodes, edges, providerVersion) {
     }
   }
 
-  for (const eip of nodes.filter((n) => n.type === 'Eip')) {
+  for (const eip of nodes.filter((n) => n.type === 'Eip' && !isExisting(n))) {
     const internetChargeType =
       eip.data.internetChargeType === 'payByBandwidth' ? 'PayByBandwidth' : 'PayByTraffic'
     const eipRows = [
@@ -587,7 +587,7 @@ ${hclLines(eipRows)}
   }
 
   // 负载均衡：按 lbConfig.type 生成 CLB/ALB/NLB/GWLB 对应的资源组
-  for (const lb of nodes.filter((n) => n.type === 'LoadBalancer')) {
+  for (const lb of nodes.filter((n) => n.type === 'LoadBalancer' && !isExisting(n))) {
     exportAliyunLoadBalancer(ctx, lb, region, blocks)
   }
 
@@ -599,7 +599,7 @@ ${hclLines(eipRows)}
 }`)
   }
 
-  for (const inst of nodes.filter((n) => n.type === 'Instance')) {
+  for (const inst of nodes.filter((n) => n.type === 'Instance' && !isExisting(n))) {
     const sub = findSubnet(inst)
     const vswRef = sub ? ref(sub) + '.id' : `"" # ${tt('unassociatedVswitch')}`
     const sgs = ctx.targetNodes(inst.id).filter((n) => n.type === 'SecurityGroup')
@@ -654,7 +654,7 @@ ${hclLines(rows)}${dataDiskBlock}
 }`)
   }
 
-  for (const rt of nodes.filter((n) => n.type === 'RouteTable')) {
+  for (const rt of nodes.filter((n) => n.type === 'RouteTable' && !isExisting(n))) {
     const vpc = findVpc(rt)
     const vpcRef = vpc ? ref(vpc) + '.id' : `"" # ${tt('unassociatedVpc')}`
     blocks.push(`resource "alicloud_route_table" "${ctx.name(rt)}" {

@@ -1,8 +1,9 @@
 import { outputOptions } from '../../data/outputs.js'
-import { isCountedInstance } from './common.js'
+import { isCountedInstance, isExisting } from './common.js'
 
 // 负载均衡资源引用：阿里云/腾讯云按所选类型指向不同资源，腾讯云 ALB 不导出
 function loadBalancerRef(vendor, node, ctx) {
+  if (isExisting(node)) return ctx.ref(node)
   const name = ctx.name(node)
   if (!name) return null
   const type = String((node.data.lbConfig && node.data.lbConfig.type) || 'clb').toLowerCase()
