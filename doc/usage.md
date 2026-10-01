@@ -1,5 +1,7 @@
 # OVN-Designer 使用指南
 
+[English](./usage.en.md) | 中文
+
 > 本指南面向使用者，介绍界面、操作与典型场景的搭建步骤。开发约定与数据模型见 [`../PROJECT_STRUCTURE.md`](../PROJECT_STRUCTURE.md)。
 
 OVN-Designer 是一个纯前端、拖拽式的虚拟网络设计器：在画布上拖拽节点、连线，完成拓扑设计后一键导出 **OVN 命令脚本** 或 **多云 Terraform 资源定义**（阿里云 / 腾讯云 / AWS / 华为云）。整个设计保存在浏览器本地，无需后端即可使用。

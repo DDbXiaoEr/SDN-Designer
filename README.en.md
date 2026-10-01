@@ -14,7 +14,7 @@ Built-in demo (cloud resources: VPC + subnet + ECS + security group + EIP + key 
 
 ## Documentation
 
-- [Usage guide](./doc/usage.md) (Chinese) — UI, workflows, export and FAQ
+- [Usage guide (English)](./doc/usage.en.md) · [中文](./doc/usage.md) — UI, workflows, export and FAQ
 - [Project structure](./PROJECT_STRUCTURE.md) — directory layout, data model and conventions
 - [Catalog service](./server/README.en.md) — vendor AK/SK proxy and API reference
 
