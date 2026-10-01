@@ -18,6 +18,9 @@ OVN-Designer/
 ├── .env.example               # 在线清单环境变量示例（VITE_CATALOG_*）
 ├── README.md / README.en.md   # 中英文说明
 ├── PROJECT_STRUCTURE.md       # 本文件：目录结构与数据模型
+├── doc/                       # 使用文档与截图
+│   ├── usage.md               # 使用指南（界面/操作/场景/导出/FAQ）
+│   └── cloud-resources(.en).png / ovn-topology(.en).png # 中英文示例截图
 ├── server/                    # Go + Gin 在线清单服务（云厂商 AK/SK 代理，独立模块）
 │   ├── main.go                # 入口：Gin 路由 / CORS / 优雅退出
 │   ├── internal/config/       # 配置：YAML 文件（环境变量可覆盖，密钥全部可配置）

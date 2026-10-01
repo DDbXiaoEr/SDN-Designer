@@ -8,6 +8,16 @@ A pure-frontend, drag-and-drop virtual network designer. Visually build virtual 
 ![Stack](https://img.shields.io/badge/Vue%20Flow-1.48-blue)
 ![Stack](https://img.shields.io/badge/vue--i18n-9-ff69b4)
 
+Built-in demo (cloud resources: VPC + subnet + ECS + security group + EIP + key pair):
+
+![Cloud resources demo topology](./doc/cloud-resources.en.png)
+
+## Documentation
+
+- [Usage guide](./doc/usage.md) (Chinese) — UI, workflows, export and FAQ
+- [Project structure](./PROJECT_STRUCTURE.md) — directory layout, data model and conventions
+- [Catalog service](./server/README.en.md) — vendor AK/SK proxy and API reference
+
 ## Features
 
 - 🖱️ Drag-and-drop canvas: drag nodes from the library, connect them by dragging handles, with zoom, pan and minimap.
@@ -55,6 +65,10 @@ npm run preview # preview production build
 2. Drag in a "Logical Switch" and connect it to any host in the zone (deploy to node).
 3. Drag in "VM" nodes, connect them to the logical switch (attach port), then to a host (deploy as a netns on that node).
 4. Export the OVN commands; the script generates tunnel encapsulation config, sets `requested-chassis` for each VM, and creates the netns / veth on the target host.
+
+The screenshot below shows a cross-physical-node OVN topology: `node1` is the control node while `node2/3/4` are compute nodes (tunnel-interconnected and auto-merged into a cluster); each node has two NICs, `ens33` (tunnel network) and `ens34` (external network); two VMs are deployed as netns on `node2` and `node4` respectively and attached to the logical switch `sw0`; the logical router `lr0` reaches `172.16.130.0/24` through the external switch `ext0`, with gateway-chassis HA (`node2` primary / `node4` standby) and NAT, providing bidirectional access to `172.16.130.133`.
+
+![Cross-physical-node OVN topology demo](./doc/ovn-topology.en.png)
 
 ## Supported Nodes
 
