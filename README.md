@@ -15,7 +15,7 @@
 ## 文档
 
 - [使用指南（中文）](./doc/usage.md) · [English](./doc/usage.en.md) — 界面、操作、典型场景、导出与常见问题
-- [项目结构](./PROJECT_STRUCTURE.md) — 目录结构、数据模型与开发约定
+- [项目结构（中文）](./PROJECT_STRUCTURE.md) · [English](./PROJECT_STRUCTURE.en.md) — 目录结构、数据模型与开发约定
 - [在线清单服务](./server/README.md) — 云厂商 AK/SK 代理与接口说明
 
 ## 特性

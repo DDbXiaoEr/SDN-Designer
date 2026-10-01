@@ -1,5 +1,7 @@
 # 项目结构
 
+[English](./PROJECT_STRUCTURE.en.md) | 中文
+
 > 本文件描述 OVN-Designer 的目录与模块职责。会话开始时应先阅读本文件，避免重复探索整个项目。
 
 ## 技术栈
@@ -17,7 +19,7 @@ OVN-Designer/
 ├── vite.config.js             # Vite 配置（@vitejs/plugin-vue）
 ├── .env.example               # 在线清单环境变量示例（VITE_CATALOG_*）
 ├── README.md / README.en.md   # 中英文说明
-├── PROJECT_STRUCTURE.md       # 本文件：目录结构与数据模型
+├── PROJECT_STRUCTURE.md / PROJECT_STRUCTURE.en.md # 本文件：目录结构与数据模型（中/英）
 ├── doc/                       # 使用文档与截图
 │   ├── usage.md / usage.en.md # 使用指南（中英文；界面/操作/场景/导出/FAQ）
 │   └── cloud-resources(.en).png / ovn-topology(.en).png # 中英文示例截图

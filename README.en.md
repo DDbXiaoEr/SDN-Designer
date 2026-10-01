@@ -15,7 +15,7 @@ Built-in demo (cloud resources: VPC + subnet + ECS + security group + EIP + key 
 ## Documentation
 
 - [Usage guide (English)](./doc/usage.en.md) · [中文](./doc/usage.md) — UI, workflows, export and FAQ
-- [Project structure](./PROJECT_STRUCTURE.md) — directory layout, data model and conventions
+- [Project structure (English)](./PROJECT_STRUCTURE.en.md) · [中文](./PROJECT_STRUCTURE.md) — directory layout, data model and conventions
 - [Catalog service](./server/README.en.md) — vendor AK/SK proxy and API reference
 
 ## Features
@@ -123,7 +123,7 @@ The toolbar's "Provider version" field is written as the main provider's `versio
 
 ## Project Structure
 
-See [`PROJECT_STRUCTURE.md`](./PROJECT_STRUCTURE.md) for the detailed directory structure and data model.
+See [`PROJECT_STRUCTURE.en.md`](./PROJECT_STRUCTURE.en.md) for the detailed directory structure and data model.
 
 ```
 src/

@@ -2,7 +2,7 @@
 
 English | [中文](./usage.md)
 
-> This guide is for users: it covers the UI, operations and step-by-step workflows. For development conventions and the data model, see [`../PROJECT_STRUCTURE.md`](../PROJECT_STRUCTURE.md).
+> This guide is for users: it covers the UI, operations and step-by-step workflows. For development conventions and the data model, see [`../PROJECT_STRUCTURE.en.md`](../PROJECT_STRUCTURE.en.md).
 
 OVN-Designer is a pure-frontend, drag-and-drop virtual network designer: drag nodes and connect them on the canvas, then export **OVN command-line scripts** or **multi-cloud Terraform** definitions (Alibaba Cloud / Tencent Cloud / AWS / Huawei Cloud) in one click. The whole design is stored in your browser locally, so no backend is required.
 
@@ -286,4 +286,4 @@ If an online fetch fails it falls back to the local list automatically and works
 | Load-balancer listener has no backend / no network attached | Add backends in the editor and connect `Subnet/VPC → Load Balancer`. |
 | Import design failed | Only JSON files exported via "Save design" are supported. |
 
-For more implementation details, the data model and development conventions, see [`../PROJECT_STRUCTURE.md`](../PROJECT_STRUCTURE.md).
+For more implementation details, the data model and development conventions, see [`../PROJECT_STRUCTURE.en.md`](../PROJECT_STRUCTURE.en.md).
