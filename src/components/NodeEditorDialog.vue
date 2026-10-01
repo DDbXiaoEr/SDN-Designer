@@ -435,7 +435,8 @@ function routePatch(i, key, value) {
 
 function addNic() {
   const nics = [...(node.value.data.nics || [])]
-  nics.push({ name: `eth${nics.length}`, ip: '', tunnel: false })
+  // 默认管理网卡；隧道/外部角色由用户按需切换
+  nics.push({ name: `eth${nics.length}`, ip: '', role: 'mgmt' })
   patch('nics', nics)
 }
 function removeNic(i) {
@@ -447,6 +448,63 @@ function nicPatch(i, key, value) {
   const nics = [...(node.value.data.nics || [])]
   nics[i] = { ...nics[i], [key]: value }
   patch('nics', nics)
+}
+// 网卡角色：兼容旧 tunnel 布尔；切换时同步 tunnel 并补默认网桥
+function nicRoleValue(nic) {
+  if (nic.role) return nic.role
+  return nic.tunnel ? 'tunnel' : 'mgmt'
+}
+function nicRolePatch(i, role) {
+  const nics = [...(node.value.data.nics || [])]
+  const next = { ...nics[i], role }
+  if (role === 'tunnel') next.tunnel = true
+  else delete next.tunnel
+  if (role === 'external') {
+    if (!next.bridge) next.bridge = 'br-ex'
+    if (!next.networkName) next.networkName = 'external'
+  }
+  nics[i] = next
+  patch('nics', nics)
+}
+
+// ---- 逻辑路由器：网关 chassis 与 NAT ----
+const gatewayHosts = computed(() => {
+  if (!node.value || node.value.type !== 'LogicalRouter') return []
+  return nodes.value.filter((n) => n.type === 'Host' && !n.data.controller)
+})
+function gatewayEntry(hostId) {
+  return (node.value.data.gatewayChassis || []).find((e) => e.hostId === hostId) || null
+}
+function gatewayPriority(hostId) {
+  const e = gatewayEntry(hostId)
+  return e && e.priority != null && e.priority !== '' ? e.priority : 20
+}
+function toggleGatewayHost(hostId, enabled) {
+  const list = (node.value.data.gatewayChassis || []).filter((e) => e.hostId !== hostId)
+  if (enabled) list.push({ hostId, priority: 20 })
+  patch('gatewayChassis', list)
+}
+function setGatewayPriority(hostId, priority) {
+  const list = (node.value.data.gatewayChassis || []).map((e) =>
+    e.hostId === hostId ? { ...e, priority } : e
+  )
+  patch('gatewayChassis', list)
+}
+
+function addNat() {
+  const nats = [...(node.value.data.nats || [])]
+  nats.push({ type: 'snat', externalIp: '', logicalIp: '', logicalPort: '', externalMac: '', enabled: true })
+  patch('nats', nats)
+}
+function removeNat(i) {
+  const nats = [...(node.value.data.nats || [])]
+  nats.splice(i, 1)
+  patch('nats', nats)
+}
+function natPatch(i, key, value) {
+  const nats = [...(node.value.data.nats || [])]
+  nats[i] = { ...nats[i], [key]: value }
+  patch('nats', nats)
 }
 
 const diskOptions = computed(() => diskTypeOptions(vendor.value))
@@ -956,18 +1014,107 @@ function toggleOutput(key, checked) {
 
         <div v-if="node.type === 'Host'" class="section">
           <div class="section-title">{{ t('inspector.nicListTitle') }}</div>
+          <p class="section-hint">{{ t('inspector.nicRoleHint') }}</p>
           <div v-for="(nic, i) in node.data.nics" :key="i" class="rule">
             <div class="rule-row">
               <input :placeholder="t('inspector.nicNamePlaceholder')" :value="nic.name" @input="nicPatch(i, 'name', $event.target.value)" />
               <input :placeholder="t('inspector.ipPlaceholder')" :value="nic.ip" @input="nicPatch(i, 'ip', $event.target.value)" />
             </div>
-            <label class="nic-tunnel">
-              <input type="checkbox" :checked="nic.tunnel" @change="nicPatch(i, 'tunnel', $event.target.checked)" />
-              {{ t('inspector.tunnelNic') }}
-              <button class="mini danger" @click="removeNic(i)">{{ t('common.delete') }}</button>
-            </label>
+            <div class="rule-row">
+              <select :value="nicRoleValue(nic)" @change="nicRolePatch(i, $event.target.value)">
+                <option value="tunnel">{{ t('inspector.nicRoles.tunnel') }}</option>
+                <option value="external">{{ t('inspector.nicRoles.external') }}</option>
+                <option value="mgmt">{{ t('inspector.nicRoles.mgmt') }}</option>
+              </select>
+            </div>
+            <div v-if="nicRoleValue(nic) === 'external'" class="rule-row">
+              <input
+                :placeholder="t('inspector.nicNetworkNamePlaceholder')"
+                :value="nic.networkName || 'external'"
+                @input="nicPatch(i, 'networkName', $event.target.value)"
+              />
+              <input
+                :placeholder="t('inspector.nicBridgePlaceholder')"
+                :value="nic.bridge || 'br-ex'"
+                @input="nicPatch(i, 'bridge', $event.target.value)"
+              />
+            </div>
+            <button class="mini danger" @click="removeNic(i)">{{ t('common.delete') }}</button>
           </div>
           <button class="add" @click="addNic">{{ t('inspector.addNic') }}</button>
+        </div>
+
+        <div v-if="node.type === 'LogicalSwitch' && node.data.isExternal" class="section">
+          <div class="section-title">{{ t('inspector.externalSwitchTitle') }}</div>
+          <p class="section-hint">{{ t('inspector.externalSwitchHint') }}</p>
+          <div class="field">
+            <label>{{ t('inspector.networkName') }}</label>
+            <input :value="node.data.networkName || 'external'" @input="patch('networkName', $event.target.value)" />
+          </div>
+          <label class="output-option">
+            <input
+              type="checkbox"
+              :checked="node.data.unknownAddresses !== false"
+              @change="patch('unknownAddresses', $event.target.checked)"
+            />
+            {{ t('inspector.unknownAddresses') }}
+          </label>
+        </div>
+
+        <div v-if="node.type === 'LogicalRouter' && node.data.externalNetwork" class="section">
+          <div class="section-title">{{ t('inspector.gatewayChassisTitle') }}</div>
+          <p class="section-hint">{{ t('inspector.gatewayChassisHint') }}</p>
+          <div v-for="h in gatewayHosts" :key="h.id" class="rule">
+            <div class="rule-row">
+              <label class="output-option">
+                <input
+                  type="checkbox"
+                  :checked="!!gatewayEntry(h.id)"
+                  @change="toggleGatewayHost(h.id, $event.target.checked)"
+                />
+                {{ h.data.name }}
+              </label>
+              <input
+                type="number"
+                min="1"
+                :disabled="!gatewayEntry(h.id)"
+                :value="gatewayPriority(h.id)"
+                @input="setGatewayPriority(h.id, Number($event.target.value))"
+              />
+            </div>
+          </div>
+          <p v-if="!gatewayHosts.length" class="section-hint">{{ t('inspector.gatewayNoHost') }}</p>
+        </div>
+
+        <div v-if="node.type === 'LogicalRouter' && node.data.externalNetwork" class="section">
+          <div class="section-title">{{ t('inspector.natTitle') }}</div>
+          <p class="section-hint">{{ t('inspector.natHint') }}</p>
+          <div v-for="(nat, i) in node.data.nats || []" :key="i" class="rule">
+            <div class="rule-row">
+              <select :value="nat.type || 'snat'" @change="natPatch(i, 'type', $event.target.value)">
+                <option value="snat">{{ t('inspector.natTypes.snat') }}</option>
+                <option value="dnat_and_snat">{{ t('inspector.natTypes.dnat_and_snat') }}</option>
+              </select>
+              <label class="output-option">
+                <input
+                  type="checkbox"
+                  :checked="nat.enabled !== false"
+                  @change="natPatch(i, 'enabled', $event.target.checked)"
+                />
+                {{ t('inspector.natEnabled') }}
+              </label>
+            </div>
+            <div class="rule-row">
+              <input :placeholder="t('inspector.natExternalIp')" :value="nat.externalIp" @input="natPatch(i, 'externalIp', $event.target.value)" />
+              <input :placeholder="t('inspector.natLogicalIp')" :value="nat.logicalIp" @input="natPatch(i, 'logicalIp', $event.target.value)" />
+            </div>
+            <div v-if="(nat.type || 'snat') === 'dnat_and_snat'" class="rule-row">
+              <input :placeholder="t('inspector.natLogicalPort')" :value="nat.logicalPort" @input="natPatch(i, 'logicalPort', $event.target.value)" />
+              <input :placeholder="t('inspector.natExternalMac')" :value="nat.externalMac" @input="natPatch(i, 'externalMac', $event.target.value)" />
+            </div>
+            <button class="mini danger" @click="removeNat(i)">{{ t('common.delete') }}</button>
+          </div>
+          <button class="add" @click="addNat">{{ t('inspector.addNatRule') }}</button>
         </div>
 
         <div v-if="node.type === 'SecurityGroup'" class="section">

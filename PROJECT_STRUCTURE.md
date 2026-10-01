@@ -48,7 +48,7 @@ OVN-Designer/
     │   ├── catalog.js         # 镜像/实例规格清单：本地内置 + 在线 JSON/厂商 API 合并
     │   ├── inventory.js       # 按地域拉取已有云资源（来自 server /api/inventory）
     │   ├── providerVersions.js # Terraform provider 已发布版本（来自 server /api/providerVersions）
-    │   ├── persistence.js     # 设计序列化/反序列化 + localStorage 自动保存
+    │   ├── persistence.js     # 设计序列化/反序列化 + localStorage 自动保存 + 旧设计字段迁移（网卡 role、外部网络/NAT 默认值）
     │   ├── theme.js           # 主题（light/dark）：<html data-theme> + localStorage，提供 setTheme/toggleTheme
     │   └── vendor.js          # 当前云厂商 + 各厂商 provider 版本（ref，持久化到 localStorage）
     ├── nodes/
@@ -95,9 +95,9 @@ OVN-Designer/
 
 | type            | 分类    | data 关键字段                                      |
 | --------------- | ------- | -------------------------------------------------- |
-| LogicalSwitch   | ovn     | `name`, `subnet`                                   |
-| LogicalRouter   | ovn     | `name`, `externalNetwork`                          |
-| Host            | ovn     | `name`, `encapType`, `nics[{name,ip,tunnel}]`      |
+| LogicalSwitch   | ovn     | `name`, `subnet`, `isExternal`(provider/localnet), `networkName`(localnet network_name), `unknownAddresses`(默认 true) |
+| LogicalRouter   | ovn     | `name`, `externalNetwork`, `externalNetworkName`, `externalIp`/`externalMac`(外部口，留空导出时取外部子网网关并自动分配 MAC), `distributed`(分布式网关), `gatewayChassis[{hostId,priority}]`(外部口网关 HA), `nats[{type:snat\|dnat_and_snat, externalIp, logicalIp, logicalPort, externalMac, enabled}]` |
+| Host            | ovn     | `name`, `encapType`, `nics[{name,ip,role: tunnel\|external\|mgmt,networkName,bridge}]`（兼容旧 `tunnel` 布尔；外部网卡 `networkName` 默认 `external`、`bridge` 默认 `br-ex`） |
 | Cluster         | ovn     | `name`, `hostCount`（自动生成，不进节点库）        |
 | VM              | ovn     | `name`, `ip`, `mac`（画布上的 VM 即宿主机上的 netns） |
 | VPC             | cloud   | `name`, `cidr`, `region`                           |
@@ -117,7 +117,8 @@ OVN-Designer/
   均为 i18n key，组件内用 `t()` 翻译（字面量选项如 `Geneve`/`VXLAN` 原样返回）。
 - 连接规则见 `CONNECTION_RULES`，`canConnect(sourceType, targetType)` 校验。
 - 「区域（zone）」= 计算 Host 通过 Host↔Host 隧道连线形成的连通分量（勾选「控制节点」的 Host 不参与），
-  由 `computeZones(nodes, edges)` 计算；`LogicalSwitch → Host` 连线表示交换机部署到该区域。
+  由 `computeZones(nodes, edges)` 计算；`LogicalSwitch → Host` 连线表示交换机部署到该区域，
+`LogicalSwitch → Cluster` 表示部署到该集群（zone）内全部节点；外部交换机（`isExternal`）另生成 localnet 端口。
 - `VM → LogicalSwitch` 表示挂载逻辑端口；`VM → Host` 表示该 VM（netns）部署到该宿主机。
   导出时控制节点对端口设置 `requested-chassis=<hostname>`，并在对应宿主机脚本中生成
   `ip netns` + veth + `ovs-vsctl add-port br-int`（`external_ids:iface-id` 对齐逻辑端口）。
@@ -277,8 +278,23 @@ OVN-Designer/
 
 - `exportOvn(nodes, edges)` 返回 `{ targets, all }`：
   - `targets` = 按执行位置拆分的命令：`central`（控制节点，ovn-nbctl/ovn-sbctl，以及部署在控制节点上的 netns）+
-    每个计算 `Host`（ovs-vsctl 封装命令 + 部署在该节点上的 netns/veth），各带独立 `content` 与 `filename`。
-  - `all` = 完整合并脚本 `{ content, filename }`。
+    每个计算 `Host`（ovs-vsctl 封装命令 + 部署在该节点上的 netns/veth），各带独立 `content` 与 `filename`；
+    另对每个「网关 chassis 宿主机」生成 `gateway-ha` 脚本（物理链路健康探测，见下）。
+  - `all` = 完整合并脚本 `{ content, filename }`（不含 `gateway-ha` 常驻脚本）。
+- 控制节点段覆盖：`ls-add`；外部交换机额外生成 `lsp-add <ls> <ls>-localnet` + `lsp-set-type localnet`
+  + `lsp-set-options network_name=<name>` + `lsp-set-addresses unknown`；`lr-add`；`lrp-add`/`lsp-add`
+  （外部口用 `externalIp/externalMac`，内部口用子网网关；端口 MAC 全局唯一，`routerPortPlan()` 统一规划）；
+  `lr-nat-add`（snat/dnat_and_snat）；`lrp-set-gateway-chassis`（多网关 + 优先级）；`ovn-nbctl set-connection ptcp:6641`
+  / `ovn-sbctl set-connection ptcp:6642`。不再输出 `ovn-sbctl chassis-add`（ovn-controller 自动注册）。
+- 计算节点段覆盖：ovn-remote/system-id/encap 配置；外部网卡时创建外部网桥（`add-br` / 物理网卡入桥 / 迁移 IP / `link set up`）
+  与 `external_ids:ovn-bridge-mappings`。映射按**每块外部网卡自己的 `networkName`** 生成（`<nic.networkName>:<nic.bridge>`，多块以逗号拼接），
+  与外部交换机的 `networkName` 按名字相等绑定；br-int、Geneve、netns/veth 保持原行为。支持多个外部网络（不同网卡填不同 `networkName`）。
+- 外部导出高可用（FR-6）：每个网关 chassis 宿主机额外生成 `ovn-gateway-ha-<host>.sh`，
+  轮询外部网卡 link 状态，down 时 `lrp-del-gateway-chassis`、up 时 `lrp-set-gateway-chassis` 恢复
+  （chassis 进程失联由 OVN 自动切换；物理链路 down 需此脚本，因 OVN 不感知）。
+- `validateOvn(nodes, edges)` 返回 `{ key, params }` 列表，`App.vue` 的 `showOvn` 用 `t()` 翻译后在导出弹窗 warning 区展示：
+  外部口未配网关 chassis、仅 1 个网关 chassis（单点）、外部交换机的 `network_name` 在其部署节点上没有同名外部网卡（无法生成 bridge-mappings）、
+  NAT 外部 IP 不在外部子网、外部交换机未设 `unknown`、路由器端口 MAC 重复。
 - `ExportModal` 接收 `groups`（分组列表），多组时显示下拉选择查看/下载对应节点的命令。
 
 ## 关键约定

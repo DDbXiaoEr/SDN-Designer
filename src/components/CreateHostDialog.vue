@@ -10,15 +10,26 @@ const error = ref('')
 const form = reactive({
   name: 'host1',
   encapType: 'geneve',
-  nics: [{ name: 'eth0', ip: '192.168.1.10', tunnel: true }],
+  nics: [{ name: 'eth0', ip: '192.168.1.10', role: 'tunnel' }],
 })
 
 function addNic() {
-  form.nics.push({ name: `eth${form.nics.length}`, ip: '', tunnel: false })
+  form.nics.push({ name: `eth${form.nics.length}`, ip: '', role: 'mgmt' })
 }
 
 function removeNic(i) {
   form.nics.splice(i, 1)
+}
+
+function onRoleChange(nic, role) {
+  nic.role = role
+  if (role === 'external') {
+    if (!nic.bridge) nic.bridge = 'br-ex'
+    if (!nic.networkName) nic.networkName = 'external'
+  } else {
+    delete nic.bridge
+    delete nic.networkName
+  }
 }
 
 function confirm() {
@@ -37,7 +48,7 @@ function confirm() {
       error.value = t('createHost.errors.nicNameRequired')
       return
     }
-    if (n.tunnel && !n.ip.trim()) {
+    if (n.role === 'tunnel' && !n.ip.trim()) {
       error.value = t('createHost.errors.tunnelNicIpRequired', { name: n.name })
       return
     }
@@ -45,7 +56,14 @@ function confirm() {
   emit('confirm', {
     name,
     encapType: form.encapType,
-    nics: nics.map((n) => ({ name: n.name.trim(), ip: n.ip.trim(), tunnel: !!n.tunnel })),
+    nics: nics.map((n) => {
+      const out = { name: n.name.trim(), ip: n.ip.trim(), role: n.role || 'mgmt' }
+      if (out.role === 'external') {
+        out.bridge = (n.bridge || 'br-ex').trim()
+        out.networkName = (n.networkName || 'external').trim()
+      }
+      return out
+    }),
   })
 }
 </script>
@@ -80,11 +98,18 @@ function confirm() {
               <input v-model="nic.name" :placeholder="t('createHost.nicNamePlaceholder')" />
               <input v-model="nic.ip" :placeholder="t('createHost.ipPlaceholder')" />
             </div>
-            <label class="nic-tunnel">
-              <input type="checkbox" v-model="nic.tunnel" />
-              {{ t('createHost.tunnelNic') }}
+            <div class="nic-row">
+              <select :value="nic.role || 'mgmt'" @change="onRoleChange(nic, $event.target.value)">
+                <option value="tunnel">{{ t('createHost.nicRoles.tunnel') }}</option>
+                <option value="external">{{ t('createHost.nicRoles.external') }}</option>
+                <option value="mgmt">{{ t('createHost.nicRoles.mgmt') }}</option>
+              </select>
               <button class="mini danger" @click="removeNic(i)">{{ t('common.delete') }}</button>
-            </label>
+            </div>
+            <div v-if="(nic.role || 'mgmt') === 'external'" class="nic-row">
+              <input v-model="nic.networkName" :placeholder="t('createHost.nicNetworkNamePlaceholder')" />
+              <input v-model="nic.bridge" :placeholder="t('createHost.nicBridgePlaceholder')" />
+            </div>
           </div>
           <button class="add" @click="addNic">{{ t('createHost.addNic') }}</button>
         </div>

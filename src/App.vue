@@ -10,7 +10,7 @@ import { NODE_TYPES, resolveConnection, isComputeTunnel, isControllerHost, orien
 import { nodeLabelKey, retargetCloudNodeData } from './data/vendors.js'
 import { createDemoDesign } from './data/demo.js'
 import { createDesigner, nextId } from './store/designer.js'
-import { exportOvn } from './export/ovn.js'
+import { exportOvn, validateOvn } from './export/ovn.js'
 import { exportTerraform } from './export/terraform/index.js'
 import { validateZones, validateInstanceZones, validateGatewaySources, validateLoadBalancers } from './export/terraform/common.js'
 import { instanceTypeZones, ensureCatalogRegion } from './store/catalog.js'
@@ -357,12 +357,21 @@ function showOvn() {
     { id: 'all', label: t('export.allNodes'), content: result.all.content, filename: result.all.filename },
     ...result.targets.map((tg) => ({
       id: tg.id,
-      label: tg.kind === 'central' ? (tg.name ? t('export.centralNodeOn', { name: tg.name }) : t('export.centralNode')) : t('export.hostNode', { name: tg.name }),
+      label:
+        tg.kind === 'central'
+          ? tg.name
+            ? t('export.centralNodeOn', { name: tg.name })
+            : t('export.centralNode')
+          : tg.kind === 'gateway-ha'
+            ? t('export.hostGatewayHa', { name: tg.name })
+            : t('export.hostNode', { name: tg.name }),
       content: tg.content,
       filename: tg.filename,
     })),
   ]
-  exportModal.value = { title: t('export.ovnTitle'), groups, zipName: 'ovn-commands' }
+  // 外部网络/NAT/网关高可用等检查提示
+  const warnings = validateOvn(nodes.value, edges.value).map((w) => t(w.key, w.params))
+  exportModal.value = { title: t('export.ovnTitle'), groups, warnings, zipName: 'ovn-commands' }
 }
 
 const CREDENTIAL_FIELDS = {

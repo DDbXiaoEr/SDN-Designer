@@ -1,8 +1,51 @@
 // 设计文件序列化 / 反序列化，以及 localStorage 持久化
 
-import { orientControlPlaneConnection } from '../data/nodeDefinitions.js'
+import { orientControlPlaneConnection, nicRole } from '../data/nodeDefinitions.js'
 
 const STORAGE_KEY = 'ovn-designer-design'
+
+// 旧设计迁移：补齐新增字段，且不覆盖已有值
+function normalizeNic(nic) {
+  const role = nicRole(nic)
+  const next = { ...nic, role }
+  if (role === 'tunnel') next.tunnel = true
+  else delete next.tunnel
+  if (role === 'external') {
+    if (!next.bridge) next.bridge = 'br-ex'
+    if (!next.networkName) next.networkName = 'external'
+  }
+  return next
+}
+
+function normalizeNode(n) {
+  if (!n || !n.data) return n
+  const d = n.data
+  if (n.type === 'Host') {
+    return { ...n, data: { ...d, nics: (d.nics || []).map(normalizeNic) } }
+  }
+  if (n.type === 'LogicalSwitch') {
+    return {
+      ...n,
+      data: { isExternal: false, networkName: 'external', unknownAddresses: true, ...d },
+    }
+  }
+  if (n.type === 'LogicalRouter') {
+    return {
+      ...n,
+      data: {
+        externalNetwork: false,
+        externalNetworkName: 'external',
+        externalIp: '',
+        externalMac: '',
+        distributed: false,
+        gatewayChassis: [],
+        nats: [],
+        ...d,
+      },
+    }
+  }
+  return n
+}
 
 function sanitizeNode(n) {
   const node = {
@@ -40,7 +83,7 @@ export function deserializeDesign(json) {
   if (!data || !Array.isArray(data.nodes) || !Array.isArray(data.edges)) {
     throw new Error('invalid design file')
   }
-  const nodes = data.nodes
+  const nodes = data.nodes.map(normalizeNode)
   const byId = new Map(nodes.map((n) => [n.id, n]))
   const edges = data.edges.map((e) =>
     orientControlPlaneConnection(byId.get(e.source), byId.get(e.target), e)

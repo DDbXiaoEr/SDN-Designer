@@ -24,12 +24,23 @@ export const NODE_TYPES = {
     defaults: () => ({
       name: 'ls1',
       subnet: '10.0.0.0/24',
+      // 标记为外部网络（provider/localnet）：导出 localnet 端口
+      isExternal: false,
+      // localnet 的 network_name，与宿主机 ovn-bridge-mappings 对应
+      networkName: 'external',
+      // 外部网段需设 unknown，未知单播才会泛洪
+      unknownAddresses: true,
     }),
     fields: [
       { key: 'name', label: 'fields.name', type: 'text' },
       { key: 'subnet', label: 'fields.subnet', type: 'text' },
+      { key: 'isExternal', label: 'fields.isExternal', type: 'checkbox' },
     ],
-    summary: (d) => [['summary.cidr', d.subnet]],
+    summary: (d) => {
+      const rows = [['summary.cidr', d.subnet]]
+      if (d.isExternal) rows.push(['summary.type', d.networkName || 'external'])
+      return rows
+    },
   },
   LogicalRouter: {
     category: 'ovn',
@@ -38,12 +49,35 @@ export const NODE_TYPES = {
     defaults: () => ({
       name: 'lr1',
       externalNetwork: false,
+      // localnet 的 network_name，默认 external
+      externalNetworkName: 'external',
+      // 外部口地址；留空导出时取关联外部子网的网关地址，可手改
+      externalIp: '',
+      externalMac: '',
+      // 是否分布式网关
+      distributed: false,
+      // 外部口网关 chassis：[{ hostId, priority }]，优先级高者优先
+      gatewayChassis: [],
+      // NAT 规则：[{ type, externalIp, logicalIp, logicalPort, externalMac, enabled }]
+      nats: [],
     }),
     fields: [
       { key: 'name', label: 'fields.name', type: 'text' },
       { key: 'externalNetwork', label: 'fields.externalNetwork', type: 'checkbox' },
+      { key: 'externalNetworkName', label: 'fields.externalNetworkName', type: 'text', when: (d) => !!d.externalNetwork },
+      { key: 'externalIp', label: 'fields.externalIp', type: 'text', when: (d) => !!d.externalNetwork },
+      { key: 'externalMac', label: 'fields.externalMac', type: 'text', when: (d) => !!d.externalNetwork },
+      { key: 'distributed', label: 'fields.distributed', type: 'checkbox', when: (d) => !!d.externalNetwork },
     ],
-    summary: () => [],
+    summary: (d) => {
+      const rows = []
+      if (d.externalNetwork) {
+        rows.push(['summary.type', d.distributed ? 'distributed' : 'centralized'])
+        if (d.externalIp) rows.push(['summary.ip', d.externalIp])
+        if ((d.nats || []).length) rows.push(['summary.nat', String(d.nats.length)])
+      }
+      return rows
+    },
   },
   Host: {
     category: 'ovn',
@@ -55,7 +89,8 @@ export const NODE_TYPES = {
       name: 'host1',
       encapType: 'geneve',
       controller: false,
-      nics: [{ name: 'eth0', ip: '192.168.1.10', tunnel: true }],
+      // 网卡角色 role: tunnel（隧道封装）/ external（外部网络）/ mgmt（管理）
+      nics: [{ name: 'eth0', ip: '192.168.1.10', role: 'tunnel', tunnel: true }],
     }),
     fields: [
       { key: 'name', label: 'fields.name', type: 'text' },
@@ -72,7 +107,7 @@ export const NODE_TYPES = {
       { key: 'controller', label: 'fields.controller', type: 'checkbox' },
     ],
     summary: (d) => {
-      const nic = (d.nics || []).find((n) => n.tunnel) || (d.nics || [])[0]
+      const nic = nicByRole(d, 'tunnel') || (d.nics || [])[0]
       return [
         ['summary.encap', d.encapType],
         ['summary.nic', nic ? `${nic.name} ${nic.ip}` : '-'],
@@ -416,6 +451,8 @@ export const CONNECTION_RULES = [
   { source: 'LogicalRouter', target: 'LogicalSwitch', label: 'connections.routerToSwitch' },
   { source: 'Host', target: 'Host', label: 'connections.hostToHost' },
   { source: 'LogicalSwitch', target: 'Host', label: 'connections.switchToHost' },
+  // 连到集群 = 部署到该 zone 内全部计算节点
+  { source: 'LogicalSwitch', target: 'Cluster', label: 'connections.switchToCluster' },
   { source: 'VPC', target: 'Cluster', label: 'connections.vpcToCluster' },
   { source: 'Cluster', target: 'Host', label: 'connections.clusterToController' },
   { source: 'VPC', target: 'Subnet', label: 'connections.vpcToSubnet' },
@@ -443,6 +480,18 @@ export function canConnect(sourceType, targetType) {
 
 export function isControllerHost(node) {
   return !!(node && node.type === 'Host' && node.data && node.data.controller)
+}
+
+// 网卡角色：tunnel / external / mgmt；兼容旧设计的 tunnel 布尔字段
+export function nicRole(nic) {
+  if (!nic) return 'mgmt'
+  if (nic.role) return nic.role
+  return nic.tunnel ? 'tunnel' : 'mgmt'
+}
+
+export function nicByRole(hostOrData, role) {
+  const nics = (hostOrData && hostOrData.nics) || []
+  return nics.find((n) => nicRole(n) === role) || null
 }
 
 // 计算节点之间的隧道互联才会归并为 Cluster；与控制节点的连线不参与
