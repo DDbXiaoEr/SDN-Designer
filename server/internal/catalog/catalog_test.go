@@ -36,6 +36,7 @@ func TestParseKind(t *testing.T) {
 		{"gpuImages", "images", true, true},
 		{"gpuInstanceTypes", "instanceTypes", true, true},
 		{"providerVersions", "", false, false},
+		{"inventory", "", false, false},
 		{"", "", false, false},
 	}
 	for _, c := range cases {

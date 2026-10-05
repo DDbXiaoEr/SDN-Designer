@@ -55,6 +55,32 @@ func TestHandlerInventory(t *testing.T) {
 	}
 }
 
+func TestHandlerInventoryNotCapturedByCatalog(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	providers := map[string]catalog.Provider{
+		"aliyun": stubInv{graph: &Graph{
+			VPCs: []VPC{{ID: "vpc-1", Name: "demo", CIDR: "10.0.0.0/16"}},
+		}},
+	}
+	r := gin.New()
+	NewHandler(providers, 0).Register(r)
+	catalog.NewHandler(providers, 0).Register(r)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/inventory/aliyun/cn-heyuan", nil)
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status %d body %s", w.Code, w.Body.String())
+	}
+	var g Graph
+	if err := json.Unmarshal(w.Body.Bytes(), &g); err != nil {
+		t.Fatal(err)
+	}
+	if g.Vendor != "aliyun" || g.Region != "cn-heyuan" || len(g.VPCs) != 1 {
+		t.Fatalf("graph: %+v", g)
+	}
+}
+
 func TestHandlerUnsupported(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	h := NewHandler(map[string]catalog.Provider{}, 0)

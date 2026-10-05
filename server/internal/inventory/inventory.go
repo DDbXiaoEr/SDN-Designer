@@ -183,7 +183,7 @@ func NewHandler(catalogProviders map[string]catalog.Provider, ttl time.Duration)
 	}
 }
 
-// Register 挂载路由（须在 catalog 的 /api/:kind/:vendor 之前注册，避免 kind=inventory 冲突）：
+// Register 挂载路由：
 //
 //	GET /api/inventory/:vendor
 //	GET /api/inventory/:vendor/:region

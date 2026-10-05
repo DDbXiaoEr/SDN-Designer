@@ -76,16 +76,22 @@ func NewHandler(providers map[string]Provider, ttl time.Duration) *Handler {
 	}
 }
 
+// catalogKinds 清单接口允许的 kind；显式注册路径，避免 /:kind 通配抢走 /api/inventory、/api/providerVersions。
+var catalogKinds = []string{"images", "instanceTypes", "gpuImages", "gpuInstanceTypes"}
+
 // Register 挂载路由：
 //
 //	GET /api/vendors
-//	GET /api/:kind/:vendor            (kind = images | instanceTypes | gpuImages | gpuInstanceTypes)
-//	GET /api/:kind/:vendor/:region
+//	GET /api/{kind}/:vendor            (kind = images | instanceTypes | gpuImages | gpuInstanceTypes)
+//	GET /api/{kind}/:vendor/:region
 func (h *Handler) Register(r gin.IRouter) {
 	g := r.Group("/api")
 	g.GET("/vendors", h.listVendors)
-	g.GET("/:kind/:vendor", h.get)
-	g.GET("/:kind/:vendor/:region", h.get)
+	for _, kind := range catalogKinds {
+		kind := kind
+		g.GET("/"+kind+"/:vendor", func(c *gin.Context) { h.get(c, kind) })
+		g.GET("/"+kind+"/:vendor/:region", func(c *gin.Context) { h.get(c, kind) })
+	}
 }
 
 func (h *Handler) listVendors(c *gin.Context) {
@@ -100,8 +106,7 @@ func (h *Handler) listVendors(c *gin.Context) {
 	})
 }
 
-func (h *Handler) get(c *gin.Context) {
-	kind := c.Param("kind")
+func (h *Handler) get(c *gin.Context, kind string) {
 	vendor := c.Param("vendor")
 	region := c.Param("region")
 	if region == "" {

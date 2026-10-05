@@ -26,7 +26,7 @@ func main() {
 
 	providers := provider.Build(cfg)
 	handler := catalog.NewHandler(providers, cfg.CacheTTL)
-	// 已有资源库存（须先于 catalog 的 /api/:kind 注册，避免 kind=inventory 冲突）
+	// 已有资源库存（catalog 只注册明确 kind 路径，不再用 /:kind 通配）
 	invHandler := inventory.NewHandler(providers, cfg.CacheTTL)
 	// Terraform provider 版本清单（公开 Registry，无需凭证，mock 模式返回示例）
 	tfVersions := tfversion.NewHandler(cfg.RegistryURL, cfg.CacheTTL, cfg.RequestTimeout, cfg.Mock)
