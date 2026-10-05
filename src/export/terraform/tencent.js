@@ -1,4 +1,4 @@
-import { createCloudContext, resolveNextHopNode, parsePortRange, resolveVpcRegion, resolveZone, gatewayEips, gatewaySnatSources, vpcSubnets, lbSubnets, lbVpc, lbHealthCheck, lbBackendInstances, instanceLoginAuth, resolveInstanceKeyPair, collectKeyPairs, collectExistingKeyPairs, escapeRegex, resolveInterconnects, routeTablesOfVpc, tlsKeyBlocks, hclLines, systemDiskConfig, dataDiskConfigs, gpuUserDataExpr, clean, instanceRef, instanceCount, isCountedInstance, instancePrivateIp, instancePrivateIpAt, instanceNameExpr, eipCount, eipRef, eipNameExpr, eipInstanceCandidates, eipBindings, isExisting, existingDataBlocks } from './common.js'
+import { createCloudContext, resolveNextHopNode, parsePortRange, resolveVpcRegion, resolveZone, gatewayEips, gatewaySnatSources, vpcSubnets, lbSubnets, lbVpc, lbHealthCheck, lbBackendInstances, instanceLoginAuth, resolveInstanceKeyPair, collectKeyPairs, collectExistingKeyPairs, escapeRegex, resolveInterconnects, routeTablesOfVpc, tlsKeyBlocks, hclLines, systemDiskConfig, dataDiskConfigs, gpuUserDataExpr, clean, instanceRef, instanceCount, isCountedInstance, instancePrivateIp, instancePrivateIpAt, instanceNameExpr, eipCount, eipRef, eipNameExpr, eipInstanceCandidates, eipBindings, isExisting, existingDataBlocks, existingImportBlocks } from './common.js'
 import { translate } from '../../i18n/index.js'
 import { buildOutputs } from './outputs.js'
 
@@ -18,8 +18,8 @@ const resourceTypes = {
   interconnect: 'tencentcloud_vpc_peering_connection',
 }
 
-const providerBlock = (providerVersion) => `terraform {
-  required_providers {
+const providerBlock = (providerVersion, adopt) => `terraform {
+${adopt ? '  required_version = ">= 1.5.0"\n\n' : ''}  required_providers {
     tencentcloud = {
       source  = "tencentcloudstack/tencentcloud"
       version = "${providerVersion}"
@@ -125,6 +125,7 @@ function exportTencentClb(ctx, lb, blocks) {
   blocks.push(`resource "tencentcloud_clb_instance" "${ctx.name(lb)}" {
 ${hclLines(rows)}
 }`)
+  if (isExisting(lb)) return // 已有负载均衡只接管实例本身，不重建监听器/后端
   ;(lb.data.rules || []).forEach((rule, ri) => {
     const ruleName = `${ctx.name(lb)}_${ri}`
     const port = Number(rule.port) || 80
@@ -207,6 +208,7 @@ function exportTencentGwlb(ctx, lb, cfg, blocks) {
   blocks.push(`resource "tencentcloud_gwlb_instance" "${name}" {
 ${hclLines(rows)}
 }`)
+  if (isExisting(lb)) return
   const lbRef = `tencentcloud_gwlb_instance.${name}.id`
   ;(lb.data.rules || []).forEach((rule, ri) => {
     const tg = `${name}_${ri}_tg`
@@ -265,20 +267,21 @@ function exportTencentLoadBalancer(ctx, lb, blocks) {
   return exportTencentClb(ctx, lb, blocks)
 }
 
-export function exportTencentTerraform(nodes, edges, providerVersion) {
-  const ctx = createCloudContext(nodes, edges, resourceTypes, 'tencent')
+export function exportTencentTerraform(nodes, edges, providerVersion, adopt = false) {
+  const ctx = createCloudContext(nodes, edges, resourceTypes, 'tencent', adopt)
   const { ref, findVpc, findSubnet } = ctx
   const region = resolveVpcRegion(nodes, 'ap-guangzhou')
-  const blocks = [...existingDataBlocks(ctx, 'tencent')]
+  // 接管模式下已有资源改由 resource 块承载，不再输出 data 块
+  const blocks = adopt ? [] : [...existingDataBlocks(ctx, 'tencent')]
 
-  for (const vpc of nodes.filter((n) => n.type === 'VPC' && !isExisting(n))) {
+  for (const vpc of nodes.filter((n) => n.type === 'VPC' && (adopt || !isExisting(n)))) {
     blocks.push(`resource "tencentcloud_vpc" "${ctx.name(vpc)}" {
   name       = "${clean(vpc.data.name)}"
   cidr_block = "${vpc.data.cidr}"
 }`)
   }
 
-  for (const sub of nodes.filter((n) => n.type === 'Subnet' && !isExisting(n))) {
+  for (const sub of nodes.filter((n) => n.type === 'Subnet' && (adopt || !isExisting(n)))) {
     const vpc = findVpc(sub)
     const vpcRef = vpc ? ref(vpc) + '.id' : `"" # ${tt('unassociatedVpc')}`
     blocks.push(`resource "tencentcloud_subnet" "${ctx.name(sub)}" {
@@ -289,10 +292,11 @@ export function exportTencentTerraform(nodes, edges, providerVersion) {
 }`)
   }
 
-  for (const sg of nodes.filter((n) => n.type === 'SecurityGroup' && !isExisting(n))) {
+  for (const sg of nodes.filter((n) => n.type === 'SecurityGroup' && (adopt || !isExisting(n)))) {
     blocks.push(`resource "tencentcloud_security_group" "${ctx.name(sg)}" {
   name = "${clean(sg.data.name)}"
 }`)
+    if (isExisting(sg)) continue // 已有安全组只接管本身，不重建规则
     ;(sg.data.rules || []).forEach((rule, i) => {
       const portRange = tcPortRange(rule)
       blocks.push(`resource "tencentcloud_security_group_rule" "${ctx.name(sg)}_${rule.direction}_${i}" {
@@ -307,7 +311,7 @@ export function exportTencentTerraform(nodes, edges, providerVersion) {
     })
   }
 
-  for (const eip of nodes.filter((n) => n.type === 'Eip' && !isExisting(n))) {
+  for (const eip of nodes.filter((n) => n.type === 'Eip' && (adopt || !isExisting(n)))) {
     const internetChargeType =
       eip.data.internetChargeType === 'payByBandwidth'
         ? 'BANDWIDTH_POSTPAID_BY_HOUR'
@@ -321,6 +325,7 @@ export function exportTencentTerraform(nodes, edges, providerVersion) {
     blocks.push(`resource "tencentcloud_eip" "${ctx.name(eip)}" {
 ${hclLines(eipRows)}
 }`)
+    if (isExisting(eip)) continue // 已有 EIP 只接管本身，不重建绑定
     // 按编辑器选择的绑定生成关联（每个 EIP 绑定到选定的实例内网 IP）
     const eipTargets = eipInstanceCandidates(ctx, eip)
     eipBindings(eip, eipTargets).forEach((b, i) => {
@@ -333,7 +338,7 @@ ${hclLines(eipRows)}
   }
 
   let snatSeq = 0 // SNAT 规则资源名后缀，保证多个网关/子网组合唯一
-  for (const gw of nodes.filter((n) => n.type === 'Gateway' && !isExisting(n))) {
+  for (const gw of nodes.filter((n) => n.type === 'Gateway' && (adopt || !isExisting(n)))) {
     const vpc = findVpc(gw)
     const vpcRef = vpc ? ref(vpc) + '.id' : `"" # ${tt('unassociatedVpc')}`
     const eips = gatewayEips(ctx, gw)
@@ -351,6 +356,7 @@ ${hclLines(eipRows)}
   bandwidth      = 100
   max_concurrent = 1000000${eipSet}
 }`)
+    if (isExisting(gw)) continue // 已有 NAT 网关只接管本身，不重建 SNAT
     // SNAT 来源：子网直连；VPC 降级为 VPC 内各子网；实例用 NETWORKINTERFACE（腾讯云原生支持）
     if (eipIpRefs.length) {
       const { vpcs, subnets, instances } = gatewaySnatSources(ctx, gw)
@@ -386,7 +392,7 @@ ${hclLines(eipRows)}
   }
 
   // 负载均衡：按 lbConfig.type 生成 CLB/GWLB 对应资源（ALB 暂不支持 Terraform）
-  for (const lb of nodes.filter((n) => n.type === 'LoadBalancer' && !isExisting(n))) {
+  for (const lb of nodes.filter((n) => n.type === 'LoadBalancer' && (adopt || !isExisting(n)))) {
     exportTencentLoadBalancer(ctx, lb, blocks)
   }
 
@@ -408,7 +414,7 @@ ${tlsKeyBlocks(keyName, resName)}`)
 }`)
   }
 
-  for (const inst of nodes.filter((n) => n.type === 'Instance' && !isExisting(n))) {
+  for (const inst of nodes.filter((n) => n.type === 'Instance' && (adopt || !isExisting(n)))) {
     const sub = findSubnet(inst)
     const vpc = findVpc(inst)
     const vpcRef = vpc ? ref(vpc) + '.id' : `"" # ${tt('unassociatedVpc')}`
@@ -471,13 +477,14 @@ ${hclLines(rows)}${dataDiskBlock}
 }`)
   }
 
-  for (const rt of nodes.filter((n) => n.type === 'RouteTable' && !isExisting(n))) {
+  for (const rt of nodes.filter((n) => n.type === 'RouteTable' && (adopt || !isExisting(n)))) {
     const vpc = findVpc(rt)
     const vpcRef = vpc ? ref(vpc) + '.id' : `"" # ${tt('unassociatedVpc')}`
     blocks.push(`resource "tencentcloud_route_table" "${ctx.name(rt)}" {
   name   = "${clean(rt.data.name)}"
   vpc_id = ${vpcRef}
 }`)
+    if (isExisting(rt)) continue // 已有路由表只接管本身，不重建路由条目
     ;(rt.data.routes || []).forEach((route, i) => {
       const hop = resolveNextHopNode(ctx, route, vpc)
       let nextType
@@ -530,9 +537,10 @@ ${hclLines(rows)}${dataDiskBlock}
   }
 
   return {
-    provider: providerBlock(providerVersion),
+    provider: providerBlock(providerVersion, adopt),
     variables: variablesBlock(region),
     main: blocks.join('\n\n') + '\n',
     outputs: buildOutputs(ctx, nodes, 'tencent'),
+    imports: adopt ? existingImportBlocks(ctx, 'tencent').join('\n\n') : '',
   }
 }

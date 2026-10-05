@@ -1,4 +1,4 @@
-import { createCloudContext, resolveNextHopNode, parsePortRange, resolveVpcRegion, resolveZone, gatewayEips, gatewaySnatSources, vpcSubnets, lbSubnets, lbVpc, lbHealthCheck, instanceLoginAuth, resolveInstanceKeyPair, collectKeyPairs, resolveInterconnects, routeTablesOfVpc, tlsKeyBlocks, hclLines, systemDiskConfig, dataDiskConfigs, gpuUserDataExpr, clean, instanceRef, instanceCount, isCountedInstance, instancePrivateIp, instancePrivateIpAt, instanceNameExpr, eipCount, eipRef, eipNameExpr, eipInstanceCandidates, eipBindings, isExisting, existingDataBlocks } from './common.js'
+import { createCloudContext, resolveNextHopNode, parsePortRange, resolveVpcRegion, resolveZone, gatewayEips, gatewaySnatSources, vpcSubnets, lbSubnets, lbVpc, lbHealthCheck, instanceLoginAuth, resolveInstanceKeyPair, collectKeyPairs, resolveInterconnects, routeTablesOfVpc, tlsKeyBlocks, hclLines, systemDiskConfig, dataDiskConfigs, gpuUserDataExpr, clean, instanceRef, instanceCount, isCountedInstance, instancePrivateIp, instancePrivateIpAt, instanceNameExpr, eipCount, eipRef, eipNameExpr, eipInstanceCandidates, eipBindings, isExisting, existingDataBlocks, existingImportBlocks } from './common.js'
 import { parseCidr } from '../utils.js'
 import { translate } from '../../i18n/index.js'
 import { buildOutputs } from './outputs.js'
@@ -19,8 +19,8 @@ const resourceTypes = {
   interconnect: 'huaweicloud_vpc_peering_connection',
 }
 
-const providerBlock = (providerVersion) => `terraform {
-  required_providers {
+const providerBlock = (providerVersion, adopt) => `terraform {
+${adopt ? '  required_version = ">= 1.5.0"\n\n' : ''}  required_providers {
     huaweicloud = {
       source  = "huaweicloud/huaweicloud"
       version = "${providerVersion}"
@@ -98,20 +98,21 @@ function huaweiChargeRows(chargeType) {
   return [['charging_mode', '"postPaid"']]
 }
 
-export function exportHuaweiTerraform(nodes, edges, providerVersion) {
-  const ctx = createCloudContext(nodes, edges, resourceTypes, 'huawei')
+export function exportHuaweiTerraform(nodes, edges, providerVersion, adopt = false) {
+  const ctx = createCloudContext(nodes, edges, resourceTypes, 'huawei', adopt)
   const { ref, findVpc, findSubnet } = ctx
   const region = resolveVpcRegion(nodes, 'cn-north-4')
-  const blocks = [...existingDataBlocks(ctx, 'huawei')]
+  // 接管模式下已有资源改由 resource 块承载，不再输出 data 块
+  const blocks = adopt ? [] : [...existingDataBlocks(ctx, 'huawei')]
 
-  for (const vpc of nodes.filter((n) => n.type === 'VPC' && !isExisting(n))) {
+  for (const vpc of nodes.filter((n) => n.type === 'VPC' && (adopt || !isExisting(n)))) {
     blocks.push(`resource "huaweicloud_vpc" "${ctx.name(vpc)}" {
   name = "${clean(vpc.data.name)}"
   cidr = "${vpc.data.cidr}"
 }`)
   }
 
-  for (const sub of nodes.filter((n) => n.type === 'Subnet' && !isExisting(n))) {
+  for (const sub of nodes.filter((n) => n.type === 'Subnet' && (adopt || !isExisting(n)))) {
     const vpc = findVpc(sub)
     const vpcRef = vpc ? ref(vpc) + '.id' : `"" # ${tt('unassociatedVpc')}`
     blocks.push(`resource "huaweicloud_vpc_subnet" "${ctx.name(sub)}" {
@@ -123,10 +124,11 @@ export function exportHuaweiTerraform(nodes, edges, providerVersion) {
 }`)
   }
 
-  for (const sg of nodes.filter((n) => n.type === 'SecurityGroup' && !isExisting(n))) {
+  for (const sg of nodes.filter((n) => n.type === 'SecurityGroup' && (adopt || !isExisting(n)))) {
     blocks.push(`resource "huaweicloud_networking_secgroup" "${ctx.name(sg)}" {
   name = "${clean(sg.data.name)}"
 }`)
+    if (isExisting(sg)) continue // 已有安全组只接管本身，不重建规则
     ;(sg.data.rules || []).forEach((rule, i) => {
       const port = parsePortRange(rule.port, rule.protocol)
       const min = port ? port.from : 'null'
@@ -144,7 +146,7 @@ export function exportHuaweiTerraform(nodes, edges, providerVersion) {
     })
   }
 
-  for (const eip of nodes.filter((n) => n.type === 'Eip' && !isExisting(n))) {
+  for (const eip of nodes.filter((n) => n.type === 'Eip' && (adopt || !isExisting(n)))) {
     const chargeMode = eip.data.internetChargeType === 'payByBandwidth' ? 'bandwidth' : 'traffic'
     const eipCountLine = isCountedInstance(eip) ? `\n  count = ${eipCount(eip)}` : ''
     blocks.push(`resource "huaweicloud_vpc_eip" "${ctx.name(eip)}" {${eipCountLine}
@@ -158,6 +160,7 @@ export function exportHuaweiTerraform(nodes, edges, providerVersion) {
     charge_mode = "${chargeMode}"
   }
 }`)
+    if (isExisting(eip)) continue // 已有 EIP 只接管本身，不重建绑定
     // 按编辑器选择的绑定生成关联（每个 EIP 绑定到选定的实例内网 IP）
     const eipTargets = eipInstanceCandidates(ctx, eip)
     eipBindings(eip, eipTargets).forEach((b, i) => {
@@ -170,7 +173,7 @@ export function exportHuaweiTerraform(nodes, edges, providerVersion) {
   }
 
   let snatSeq = 0 // SNAT 规则资源名后缀，保证多个网关/子网组合唯一
-  for (const gw of nodes.filter((n) => n.type === 'Gateway' && !isExisting(n))) {
+  for (const gw of nodes.filter((n) => n.type === 'Gateway' && (adopt || !isExisting(n)))) {
     const sub = findSubnet(gw)
     const vpc = findVpc(gw)
     const vpcRef = vpc ? ref(vpc) + '.id' : `"" # ${tt('unassociatedVpc')}`
@@ -181,6 +184,7 @@ export function exportHuaweiTerraform(nodes, edges, providerVersion) {
   subnet_id = ${subRef}
   spec      = "1"
 }`)
+    if (isExisting(gw)) continue // 已有 NAT 网关只接管本身，不重建 SNAT
     // SNAT 来源：子网直连；实例降级到其所属子网；VPC 降级为 VPC 内各子网。
     // floating_ip_id 即绑定的 EIP（多个用逗号连接），使多台 ECS 共享同一公网出口
     // 展开 EIP 数量，得到全部公网 IP 引用（多出口）
@@ -208,7 +212,7 @@ export function exportHuaweiTerraform(nodes, edges, providerVersion) {
   }
 
   // 负载均衡：ELB 实例 + 每个监听规则一个监听器/后端服务器组/成员
-  for (const lb of nodes.filter((n) => n.type === 'LoadBalancer' && !isExisting(n))) {
+  for (const lb of nodes.filter((n) => n.type === 'LoadBalancer' && (adopt || !isExisting(n)))) {
     const vpc = lbVpc(ctx, lb)
     const sub = lbSubnets(ctx, lb)[0]
     const zone = resolveZone(sub && sub.data.zone, (vpc && vpc.data.region) || region, 'huawei')
@@ -221,6 +225,7 @@ export function exportHuaweiTerraform(nodes, edges, providerVersion) {
     blocks.push(`resource "huaweicloud_elb_loadbalancer" "${ctx.name(lb)}" {
 ${hclLines(rows)}
 }`)
+    if (isExisting(lb)) continue // 已有负载均衡只接管本身，不重建监听器/后端
     ;(lb.data.rules || []).forEach((rule, ri) => {
       const ruleName = `${ctx.name(lb)}_${ri}`
       const port = Number(rule.port) || 80
@@ -306,7 +311,7 @@ ${hclLines(mrows)}
 ${tlsKeyBlocks(keyName, resName)}`)
   }
 
-  for (const inst of nodes.filter((n) => n.type === 'Instance' && !isExisting(n))) {
+  for (const inst of nodes.filter((n) => n.type === 'Instance' && (adopt || !isExisting(n)))) {
     const sub = findSubnet(inst)
     const subRef = sub ? ref(sub) + '.id' : `"" # ${tt('unassociatedVswitch')}`
     const sgs = ctx.targetNodes(inst.id).filter((n) => n.type === 'SecurityGroup')
@@ -363,13 +368,14 @@ ${hclLines(rows)}${dataDiskBlock}
 }`)
   }
 
-  for (const rt of nodes.filter((n) => n.type === 'RouteTable' && !isExisting(n))) {
+  for (const rt of nodes.filter((n) => n.type === 'RouteTable' && (adopt || !isExisting(n)))) {
     const vpc = findVpc(rt)
     const vpcRef = vpc ? ref(vpc) + '.id' : `"" # ${tt('unassociatedVpc')}`
     blocks.push(`resource "huaweicloud_vpc_route_table" "${ctx.name(rt)}" {
   name   = "${clean(rt.data.name)}"
   vpc_id = ${vpcRef}
 }`)
+    if (isExisting(rt)) continue // 已有路由表只接管本身，不重建路由条目
     ;(rt.data.routes || []).forEach((route, i) => {
       const hop = resolveNextHopNode(ctx, route, vpc)
       let type
@@ -420,9 +426,10 @@ ${hclLines(rows)}${dataDiskBlock}
   }
 
   return {
-    provider: providerBlock(providerVersion),
+    provider: providerBlock(providerVersion, adopt),
     variables: variablesBlock(region),
     main: blocks.join('\n\n') + '\n',
     outputs: buildOutputs(ctx, nodes, 'huawei'),
+    imports: adopt ? existingImportBlocks(ctx, 'huawei').join('\n\n') : '',
   }
 }

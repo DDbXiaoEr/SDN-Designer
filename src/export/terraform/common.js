@@ -79,8 +79,44 @@ export function existingDataBlocks(ctx, vendor) {
   return blocks
 }
 
+// 节点类型 -> 各厂商资源类型映射键（接管模式下生成 resource 引用与 import 目标）
+const NODE_RESOURCE_KEY = {
+  VPC: 'vpc',
+  Subnet: 'subnet',
+  Instance: 'instance',
+  SecurityGroup: 'securityGroup',
+  Eip: 'eip',
+  Gateway: 'natGateway',
+  LoadBalancer: 'loadBalancer',
+  RouteTable: 'routeTable',
+  Interconnect: 'interconnect',
+}
+
+// 接管模式下已有资源对应的可 import 资源类型（与新建资源同类型）
+export function adoptResourceType(vendor, node, resourceTypes) {
+  if (!isExisting(node) || !resourceTypes) return null
+  const key = NODE_RESOURCE_KEY[node.type]
+  return key ? resourceTypes[key] || null : null
+}
+
+// 接管模式：为已有资源生成 import 块（Terraform >= 1.5），
+// 配合导出的 resource 块可在 apply 后纳入 state，进而 destroy 删除
+export function existingImportBlocks(ctx, vendor) {
+  const blocks = []
+  for (const node of ctx.nodes) {
+    const type = adoptResourceType(vendor, node, ctx.resourceTypes)
+    if (!type) continue
+    const id = existingId(node)
+    const n = ctx.name(node)
+    if (!id || !n) continue
+    blocks.push(`import {\n  to = ${type}.${n}\n  id = "${id}"\n}`)
+  }
+  return blocks
+}
+
 // 云资源导出共享上下文：资源唯一命名、引用解析、VPC/子网归属
-export function createCloudContext(nodes, edges, resourceTypes, vendor) {
+// adopt=true 时已有资源不再生成 data 块，而是以 resource 引用（ctx.ref 指向资源地址）
+export function createCloudContext(nodes, edges, resourceTypes, vendor, adopt = false) {
   const { byId, sourceNodes, targetNodes } = buildGraph(nodes, edges)
 
   const resourceNames = new Map()
@@ -98,6 +134,11 @@ export function createCloudContext(nodes, edges, resourceTypes, vendor) {
   const name = (node) => resourceNames.get(node.id)
 
   const ref = (node) => {
+    // 接管模式：已有资源也走 resource 引用（与生成的 resource/import 块一致）
+    if (adopt) {
+      const rt = adoptResourceType(vendor, node, resourceTypes)
+      if (rt) return `${rt}.${name(node)}`
+    }
     const spec = vendor ? dataSourceSpec(vendor, node) : null
     if (spec) return spec.ref(name(node))
     const type = node.type
@@ -123,6 +164,9 @@ export function createCloudContext(nodes, edges, resourceTypes, vendor) {
     if (subnet) return findVpc(subnet, depth + 1)
     const inst = candidates.find((n) => n.type === 'Instance')
     if (inst) return findVpc(inst, depth + 1)
+    // 库存导入的安全组等节点可能不带 VPC 连线，直接按 data.vpcId（云资源 ID）回退
+    const vid = clean(node.data && node.data.vpcId)
+    if (vid) return nodes.find((n) => n.type === 'VPC' && existingId(n) === vid) || null
     return null
   }
 
@@ -132,7 +176,7 @@ export function createCloudContext(nodes, edges, resourceTypes, vendor) {
     return sourceNodes(node.id).find((n) => n.type === 'Subnet') || null
   }
 
-  return { byId, sourceNodes, targetNodes, nodes, edges, name, ref, findVpc, findSubnet }
+  return { byId, sourceNodes, targetNodes, nodes, edges, name, ref, findVpc, findSubnet, adopt, resourceTypes }
 }
 
 // 根据路由条目的下一跳类型，在所属 VPC 内自动解析目标节点

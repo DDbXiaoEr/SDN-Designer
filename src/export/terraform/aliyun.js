@@ -1,4 +1,4 @@
-import { createCloudContext, resolveNextHopNode, resolveVpcRegion, resolveZone, gatewayEips, gatewaySnatSources, lbSubnets, lbVpc, lbHealthCheck, lbBackendInstances, instanceLoginAuth, resolveInstanceKeyPair, collectKeyPairs, resolveInterconnects, routeTablesOfVpc, hclLines, systemDiskConfig, dataDiskConfigs, gpuUserDataExpr, clean, instanceRef, instanceCount, isCountedInstance, instancePrivateIp, instancePrivateIpAt, instanceNameExpr, eipCount, eipRef, eipNameExpr, eipInstanceCandidates, eipBindings, isExisting, existingDataBlocks } from './common.js'
+import { createCloudContext, resolveNextHopNode, resolveVpcRegion, resolveZone, gatewayEips, gatewaySnatSources, lbSubnets, lbVpc, lbHealthCheck, lbBackendInstances, instanceLoginAuth, resolveInstanceKeyPair, collectKeyPairs, resolveInterconnects, routeTablesOfVpc, hclLines, systemDiskConfig, dataDiskConfigs, gpuUserDataExpr, clean, instanceRef, instanceCount, isCountedInstance, instancePrivateIp, instancePrivateIpAt, instanceNameExpr, eipCount, eipRef, eipNameExpr, eipInstanceCandidates, eipBindings, isExisting, existingDataBlocks, existingImportBlocks } from './common.js'
 import { translate } from '../../i18n/index.js'
 import { buildOutputs } from './outputs.js'
 
@@ -18,8 +18,8 @@ const resourceTypes = {
   interconnect: 'alicloud_vpc_peer_connection',
 }
 
-const providerBlock = (providerVersion) => `terraform {
-  required_providers {
+const providerBlock = (providerVersion, adopt) => `terraform {
+${adopt ? '  required_version = ">= 1.5.0"\n\n' : ''}  required_providers {
     alicloud = {
       source  = "aliyun/alicloud"
       version = "${providerVersion}"
@@ -214,6 +214,7 @@ function exportAliyunClb(ctx, lb, cfg, blocks) {
   if (cfg.internetChargeType === 'PayByBandwidth') rows.push(['bandwidth', String(cfg.bandwidth)])
   if (sub) rows.push(['vswitch_id', `${ref(sub)}.id`])
   blocks.push(resourceBlock('alicloud_slb_load_balancer', name, hclLines(rows)))
+  if (isExisting(lb)) return // 已有负载均衡只接管实例本身，不重建监听器/后端
   ;(lb.data.rules || []).forEach((rule, ri) => {
     const ruleName = `${name}_${ri}`
     const sgName = `${ruleName}_sg`
@@ -297,6 +298,7 @@ function exportAliyunAlb(ctx, lb, cfg, region, blocks) {
     .join('\n')
   const billing = nestedBlock('load_balancer_billing_config', [['pay_type', '"PayAsYouGo"']], 2)
   blocks.push(resourceBlock('alicloud_alb_load_balancer', name, [hclLines(rows), billing, zones].filter(Boolean).join('\n')))
+  if (isExisting(lb)) return
 
   ;(lb.data.rules || []).forEach((rule, ri) => {
     const proto = String(rule.protocol || 'http').toLowerCase()
@@ -360,6 +362,7 @@ function exportAliyunNlb(ctx, lb, cfg, region, blocks) {
     .map((m) => nestedBlock('zone_mappings', [['vswitch_id', m.vswId], ['zone_id', `"${m.zone}"`]], 2))
     .join('\n')
   blocks.push(resourceBlock('alicloud_nlb_load_balancer', name, [hclLines(rows), zones].filter(Boolean).join('\n')))
+  if (isExisting(lb)) return
 
   ;(lb.data.rules || []).forEach((rule, ri) => {
     const proto = String(rule.protocol || 'tcp').toLowerCase()
@@ -414,6 +417,7 @@ function exportAliyunGwlb(ctx, lb, cfg, region, blocks) {
     .map((m) => nestedBlock('zone_mappings', [['vswitch_id', m.vswId], ['zone_id', `"${m.zone}"`]], 2))
     .join('\n')
   blocks.push(resourceBlock('alicloud_gwlb_load_balancer', name, [hclLines(rows), zones].filter(Boolean).join('\n')))
+  if (isExisting(lb)) return
 
   ;(lb.data.rules || []).forEach((rule, ri) => {
     const port = Number(rule.port) || 6081
@@ -451,20 +455,21 @@ function exportAliyunLoadBalancer(ctx, lb, region, blocks) {
 }
 
 
-export function exportAliyunTerraform(nodes, edges, providerVersion) {
-  const ctx = createCloudContext(nodes, edges, resourceTypes, 'aliyun')
+export function exportAliyunTerraform(nodes, edges, providerVersion, adopt = false) {
+  const ctx = createCloudContext(nodes, edges, resourceTypes, 'aliyun', adopt)
   const { ref, findVpc, findSubnet } = ctx
   const region = resolveVpcRegion(nodes, 'cn-hangzhou')
-  const blocks = [...existingDataBlocks(ctx, 'aliyun')]
+  // 接管模式下已有资源改由 resource 块承载，不再输出 data 块
+  const blocks = adopt ? [] : [...existingDataBlocks(ctx, 'aliyun')]
 
-  for (const vpc of nodes.filter((n) => n.type === 'VPC' && !isExisting(n))) {
+  for (const vpc of nodes.filter((n) => n.type === 'VPC' && (adopt || !isExisting(n)))) {
     blocks.push(`resource "alicloud_vpc" "${ctx.name(vpc)}" {
   vpc_name   = "${clean(vpc.data.name)}"
   cidr_block = "${vpc.data.cidr}"
 }`)
   }
 
-  for (const sub of nodes.filter((n) => n.type === 'Subnet' && !isExisting(n))) {
+  for (const sub of nodes.filter((n) => n.type === 'Subnet' && (adopt || !isExisting(n)))) {
     const vpc = findVpc(sub)
     const vpcRef = vpc ? ref(vpc) + '.id' : `"" # ${tt('unassociatedVpc')}`
     blocks.push(`resource "alicloud_vswitch" "${ctx.name(sub)}" {
@@ -475,13 +480,14 @@ export function exportAliyunTerraform(nodes, edges, providerVersion) {
 }`)
   }
 
-  for (const sg of nodes.filter((n) => n.type === 'SecurityGroup' && !isExisting(n))) {
+  for (const sg of nodes.filter((n) => n.type === 'SecurityGroup' && (adopt || !isExisting(n)))) {
     const vpc = findVpc(sg)
     const vpcRef = vpc ? ref(vpc) + '.id' : `"" # ${tt('unassociatedVpc')}`
     blocks.push(`resource "alicloud_security_group" "${ctx.name(sg)}" {
   security_group_name = "${clean(sg.data.name)}"
   vpc_id              = ${vpcRef}
 }`)
+    if (isExisting(sg)) continue // 已有安全组只接管本身，不重建规则
     ;(sg.data.rules || []).forEach((rule, i) => {
       const ipProtocol = rule.protocol === 'icmp' ? 'icmp' : rule.protocol === 'all' ? 'all' : rule.protocol
       const portRange = rule.protocol === 'icmp' || rule.protocol === 'all' ? '-1/-1' : rule.port
@@ -497,7 +503,7 @@ export function exportAliyunTerraform(nodes, edges, providerVersion) {
   }
 
   let snatSeq = 0 // SNAT 条目的资源名后缀，保证多个网关/子网组合唯一
-  for (const gw of nodes.filter((n) => n.type === 'Gateway' && !isExisting(n))) {
+  for (const gw of nodes.filter((n) => n.type === 'Gateway' && (adopt || !isExisting(n)))) {
     const sub = findSubnet(gw)
     const vpc = findVpc(gw)
     const vpcRef = vpc ? ref(vpc) + '.id' : '""'
@@ -508,6 +514,7 @@ export function exportAliyunTerraform(nodes, edges, providerVersion) {
   nat_gateway_name = "${clean(gw.data.name)}"
   nat_type         = "Enhanced"
 }`)
+    if (isExisting(gw)) continue // 已有 NAT 网关只接管本身，不重建 SNAT 条目
     // SNAT 来源：子网按 vswitch 生成；实例降级到其实例所属子网；VPC 用 source_cidr（阿里云原生支持）
     const eips = gatewayEips(ctx, gw)
     const { vpcs, subnets, instances } = gatewaySnatSources(ctx, gw)
@@ -544,7 +551,7 @@ export function exportAliyunTerraform(nodes, edges, providerVersion) {
     }
   }
 
-  for (const eip of nodes.filter((n) => n.type === 'Eip' && !isExisting(n))) {
+  for (const eip of nodes.filter((n) => n.type === 'Eip' && (adopt || !isExisting(n)))) {
     const internetChargeType =
       eip.data.internetChargeType === 'payByBandwidth' ? 'PayByBandwidth' : 'PayByTraffic'
     const eipRows = [
@@ -560,6 +567,7 @@ export function exportAliyunTerraform(nodes, edges, providerVersion) {
     blocks.push(`resource "alicloud_eip" "${ctx.name(eip)}" {
 ${hclLines(eipRows)}
 }`)
+    if (isExisting(eip)) continue // 已有 EIP 只接管本身，不重建绑定
     // 按编辑器选择的绑定生成关联（每个 EIP 绑定到选定的实例内网 IP）
     const eipTargets = eipInstanceCandidates(ctx, eip)
     eipBindings(eip, eipTargets).forEach((b, i) => {
@@ -587,7 +595,7 @@ ${hclLines(eipRows)}
   }
 
   // 负载均衡：按 lbConfig.type 生成 CLB/ALB/NLB/GWLB 对应的资源组
-  for (const lb of nodes.filter((n) => n.type === 'LoadBalancer' && !isExisting(n))) {
+  for (const lb of nodes.filter((n) => n.type === 'LoadBalancer' && (adopt || !isExisting(n)))) {
     exportAliyunLoadBalancer(ctx, lb, region, blocks)
   }
 
@@ -599,7 +607,7 @@ ${hclLines(eipRows)}
 }`)
   }
 
-  for (const inst of nodes.filter((n) => n.type === 'Instance' && !isExisting(n))) {
+  for (const inst of nodes.filter((n) => n.type === 'Instance' && (adopt || !isExisting(n)))) {
     const sub = findSubnet(inst)
     const vswRef = sub ? ref(sub) + '.id' : `"" # ${tt('unassociatedVswitch')}`
     const sgs = ctx.targetNodes(inst.id).filter((n) => n.type === 'SecurityGroup')
@@ -654,13 +662,14 @@ ${hclLines(rows)}${dataDiskBlock}
 }`)
   }
 
-  for (const rt of nodes.filter((n) => n.type === 'RouteTable' && !isExisting(n))) {
+  for (const rt of nodes.filter((n) => n.type === 'RouteTable' && (adopt || !isExisting(n)))) {
     const vpc = findVpc(rt)
     const vpcRef = vpc ? ref(vpc) + '.id' : `"" # ${tt('unassociatedVpc')}`
     blocks.push(`resource "alicloud_route_table" "${ctx.name(rt)}" {
   vpc_id           = ${vpcRef}
   route_table_name = "${clean(rt.data.name)}"
 }`)
+    if (isExisting(rt)) continue // 已有路由表只接管本身，不重建路由条目
     ;(rt.data.routes || []).forEach((route, i) => {
       let nexthopId = route.nextHop
       if (!nexthopId) {
@@ -702,9 +711,10 @@ ${hclLines(rows)}${dataDiskBlock}
   }
 
   return {
-    provider: providerBlock(providerVersion),
+    provider: providerBlock(providerVersion, adopt),
     variables: variablesBlock(region),
     main: blocks.join('\n\n') + '\n',
     outputs: buildOutputs(ctx, nodes, 'aliyun'),
+    imports: adopt ? existingImportBlocks(ctx, 'aliyun').join('\n\n') : '',
   }
 }

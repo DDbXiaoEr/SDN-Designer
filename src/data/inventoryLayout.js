@@ -204,6 +204,8 @@ export function graphToDesign(graph, vendor) {
       data: {
         ...cloneDefaults('SecurityGroup', vendor),
         name: sg.name || sg.id,
+        // 安全组无 VPC 连线，保留云上 VPC ID 供接管导出解析 vpc_id
+        vpcId: sg.vpcId || '',
         rules: Array.isArray(sg.rules) && sg.rules.length ? sg.rules : cloneDefaults('SecurityGroup', vendor).rules,
         ...existingMeta(sg.id),
       },

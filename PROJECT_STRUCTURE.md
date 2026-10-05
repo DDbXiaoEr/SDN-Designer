@@ -76,9 +76,9 @@ OVN-Designer/
     │   ├── utils.js           # 通用工具：CIDR/MAC/图关系/computeZones/download/createZip
     │   ├── ovn.js             # exportOvn(nodes, edges) -> {targets, all}（按执行节点拆分）
     │   └── terraform/
-    │       ├── common.js      # 导出共享上下文与工具（命名/引用/已有资源 data source/VPC解析/下一跳/密钥对/磁盘/tls）
+    │       ├── common.js      # 导出共享上下文与工具（命名/引用/已有资源 data source 与接管 import/VPC解析/下一跳/密钥对/磁盘/tls）
     │       ├── outputs.js     # buildOutputs：生成 output.tf（创建后可获取属性）
-    │       ├── index.js       # exportTerraform(nodes, edges, vendor) 按厂商分发
+    │       ├── index.js       # exportTerraform(nodes, edges, vendor, providerVersion, adoptExisting) 按厂商分发（接管模式追加 import.tf）
     │       ├── aliyun.js      # 阿里云 Terraform 导出
     │       ├── aws.js         # AWS Terraform 导出
     │       ├── tencent.js     # 腾讯云 Terraform 导出
@@ -148,7 +148,8 @@ OVN-Designer/
 
 ### 云厂商（vendor）
 
-- 工具栏「关联现有实例」打开 `ImportInventoryDialog`：选择当前厂商地域后请求 `GET /api/inventory/:vendor/:region`（前端 `store/inventory.js`，URL 复用 `VITE_CATALOG_API_URL` 的 `{kind}=inventory` 或 `VITE_INVENTORY_API_URL`），将返回的 VPC/子网/实例/安全组/EIP/NAT/密钥对/路由表/负载均衡及关系经 `inventoryLayout.js` 布局到画布。画布非空时先确认覆盖。导入节点带 `data.existing` + `data.cloudId`，节点徽标显示「已有」；导出 Terraform 时 `common.js` 的 `existingDataBlocks` 按厂商生成 data source，新建资源循环跳过这些节点，引用走 data。mock 模式返回示例拓扑便于无凭证联调。
+- 工具栏「关联现有实例」打开 `ImportInventoryDialog`：选择当前厂商地域后请求 `GET /api/inventory/:vendor/:region`（前端 `store/inventory.js`，URL 复用 `VITE_CATALOG_API_URL` 的 `{kind}=inventory` 或 `VITE_INVENTORY_API_URL`），将返回的 VPC/子网/实例/安全组/EIP/NAT/密钥对/路由表/负载均衡及关系经 `inventoryLayout.js` 布局到画布。画布非空时先确认覆盖。导入节点带 `data.existing` + `data.cloudId`，节点徽标显示「已有」；默认导出 Terraform 时 `common.js` 的 `existingDataBlocks` 按厂商生成 data source（只读），新建资源循环跳过这些节点，引用走 data。mock 模式返回示例拓扑便于无凭证联调。
+  - **接管已有资源（可在 Terraform 中 import 后 destroy）**：`ExportModal` 上的「接管已有资源」开关（仅画布存在 `existing` 节点时显示，默认关闭）会以 `adoptExisting=true` 调用 `exportTerraform`。此时 `createCloudContext` 的 `ref` 让已有资源改走 `resource` 引用，各厂商导出器将这些节点也纳入新建资源循环生成 `resource` 块（已有安全组/路由表/NAT 网关/负载均衡/EIP 不再重建其规则、路由、SNAT、监听器、绑定等子资源），并额外由 `existingImportBlocks` 生成 `import.tf`（`import { to = <资源地址>, id = <cloudId> }`，需 Terraform ≥ 1.5）。流程：`terraform init` → `terraform plan`（如提示缺少必填字段，可移除对应 `resource` 块后改用 `terraform plan -generate-config-out=generated.tf` 生成）→ `terraform apply` 纳入 state → `terraform destroy` 删除。apply 可能按当前配置调整真实资源，需先审阅 plan。库存导入的安全组带有 `data.vpcId`，`createCloudContext.findVpc` 在无连线时按该 ID 回退解析所属 VPC。
 - 工具栏选择云厂商：`aliyun` / `tencent` / `aws` / `huawei`，存于 `store/vendor.js`，持久化到 localStorage。
 - 工具栏「Provider 版本」输入框对应当前厂商，写入 `provider.tf` 中主 provider 的 `version` 约束
   （如 `~> 5.0` / `>= 1.200.0`）；各厂商版本独立保存于 `store/vendor.js` 的 `providerVersions`，

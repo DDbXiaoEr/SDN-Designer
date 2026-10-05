@@ -12,7 +12,7 @@ import { createDemoDesign } from './data/demo.js'
 import { createDesigner, nextId } from './store/designer.js'
 import { exportOvn, validateOvn } from './export/ovn.js'
 import { exportTerraform } from './export/terraform/index.js'
-import { validateZones, validateInstanceZones, validateGatewaySources, validateLoadBalancers } from './export/terraform/common.js'
+import { validateZones, validateInstanceZones, validateGatewaySources, validateLoadBalancers, isExisting } from './export/terraform/common.js'
 import { instanceTypeZones, ensureCatalogRegion } from './store/catalog.js'
 import { download } from './export/utils.js'
 import { serializeDesign, deserializeDesign, loadFromStorage } from './store/persistence.js'
@@ -393,8 +393,19 @@ const CREDENTIAL_FIELDS = {
   ],
 }
 
+// 接管模式开关（默认关闭）：开启后已有资源导出为 resource + import，可 import 后 destroy
+const terraformAdopt = ref(false)
+
 function showTerraform() {
-  const files = exportTerraform(nodes.value, edges.value, vendor.value, providerVersion.value)
+  buildTerraform(terraformAdopt.value)
+}
+
+function buildTerraform(adopt) {
+  // 仅当画布上存在「已有」资源时才启用接管模式
+  const adoptable = nodes.value.some((n) => isExisting(n))
+  const useAdopt = adopt && adoptable
+  terraformAdopt.value = useAdopt
+  const files = exportTerraform(nodes.value, edges.value, vendor.value, providerVersion.value, useAdopt)
   const warnings = validateZones(nodes.value, edges.value, vendor.value).map((issue) =>
     t('export.zoneMismatch', {
       subnet: issue.name,
@@ -444,6 +455,8 @@ function showTerraform() {
     warnings,
     zipName: `terraform-${vendor.value}`,
     credentialFields: CREDENTIAL_FIELDS[vendor.value] || [],
+    adopt: useAdopt,
+    adoptable,
   }
 }
 
@@ -532,6 +545,9 @@ const edgeOptions = computed(() => ({
       :warnings="exportModal.warnings"
       :zip-name="exportModal.zipName"
       :credential-fields="exportModal.credentialFields || []"
+      :adopt="exportModal.adopt || false"
+      :adoptable="exportModal.adoptable || false"
+      @toggle-adopt="buildTerraform"
       @close="exportModal = null"
     />
 

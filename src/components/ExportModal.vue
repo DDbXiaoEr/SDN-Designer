@@ -10,9 +10,12 @@ const props = defineProps({
   zipName: { type: String, default: 'export' },
   credentialFields: { type: Array, default: () => [] },
   credentialGroupId: { type: String, default: 'variables' },
+  // Terraform 接管模式：为已有资源生成 resource + import 块（可 import 后 destroy）
+  adopt: { type: Boolean, default: false },
+  adoptable: { type: Boolean, default: false },
 })
 
-const emit = defineEmits(['close'])
+const emit = defineEmits(['close', 'toggle-adopt'])
 const { t } = useI18n()
 const copied = ref(false)
 const selectedId = ref(props.groups.length ? props.groups[0].id : null)
@@ -81,6 +84,17 @@ function downloadAll() {
           <button v-if="hasSelector" @click="downloadAll">{{ t('common.downloadAllZip') }}</button>
           <button class="close" @click="emit('close')">{{ t('common.close') }}</button>
         </div>
+      </div>
+      <div v-if="adoptable" class="adopt">
+        <label class="adopt-toggle">
+          <input
+            type="checkbox"
+            :checked="adopt"
+            @change="emit('toggle-adopt', $event.target.checked)"
+          />
+          <span>{{ t('export.adoptExisting') }}</span>
+        </label>
+        <p v-if="adopt" class="adopt-hint">{{ t('export.adoptExistingHint') }}</p>
       </div>
       <div v-if="warnings.length" class="warnings">
         <div class="warnings-title">{{ t('export.warningsTitle') }}</div>
@@ -178,6 +192,28 @@ function downloadAll() {
   padding: 6px 8px;
   font-size: 12px;
   font-family: var(--font-mono);
+}
+.adopt {
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--rule);
+  background: var(--surface-2);
+}
+.adopt-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.adopt-toggle input {
+  accent-color: var(--plot);
+}
+.adopt-hint {
+  margin: 6px 0 0;
+  font-size: 11px;
+  line-height: 1.6;
+  color: var(--ink-dim);
 }
 .warnings {
   padding: 10px 16px;

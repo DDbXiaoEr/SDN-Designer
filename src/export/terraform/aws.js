@@ -1,4 +1,4 @@
-import { createCloudContext, resolveNextHopNode, parsePortRange, resolveVpcRegion, resolveZone, gatewayEips, lbSubnets, lbVpc, lbHealthCheck, instanceLoginAuth, resolveInstanceKeyPair, collectKeyPairs, resolveInterconnects, routeTablesOfVpc, tlsKeyBlocks, hclLines, systemDiskConfig, dataDiskConfigs, gpuUserDataExpr, clean, instanceRef, instanceCount, isCountedInstance, instancePrivateIp, instanceNameExpr, eipCount, eipRef, eipNameExpr, eipInstanceCandidates, eipBindings, isExisting, existingDataBlocks } from './common.js'
+import { createCloudContext, resolveNextHopNode, parsePortRange, resolveVpcRegion, resolveZone, gatewayEips, lbSubnets, lbVpc, lbHealthCheck, instanceLoginAuth, resolveInstanceKeyPair, collectKeyPairs, resolveInterconnects, routeTablesOfVpc, tlsKeyBlocks, hclLines, systemDiskConfig, dataDiskConfigs, gpuUserDataExpr, clean, instanceRef, instanceCount, isCountedInstance, instancePrivateIp, instanceNameExpr, eipCount, eipRef, eipNameExpr, eipInstanceCandidates, eipBindings, isExisting, existingDataBlocks, existingImportBlocks } from './common.js'
 import { translate } from '../../i18n/index.js'
 import { buildOutputs } from './outputs.js'
 
@@ -18,8 +18,8 @@ const resourceTypes = {
   interconnect: 'aws_vpc_peering_connection',
 }
 
-const providerBlock = (providerVersion) => `terraform {
-  required_providers {
+const providerBlock = (providerVersion, adopt) => `terraform {
+${adopt ? '  required_version = ">= 1.5.0"\n\n' : ''}  required_providers {
     aws = {
       source  = "hashicorp/aws"
       version = "${providerVersion}"
@@ -68,13 +68,14 @@ function awsProtocol(protocol) {
   return protocol
 }
 
-export function exportAwsTerraform(nodes, edges, providerVersion) {
-  const ctx = createCloudContext(nodes, edges, resourceTypes, 'aws')
+export function exportAwsTerraform(nodes, edges, providerVersion, adopt = false) {
+  const ctx = createCloudContext(nodes, edges, resourceTypes, 'aws', adopt)
   const { ref, findVpc, findSubnet } = ctx
   const region = resolveVpcRegion(nodes, 'us-east-1')
-  const blocks = [...existingDataBlocks(ctx, 'aws')]
+  // 接管模式下已有资源改由 resource 块承载，不再输出 data 块
+  const blocks = adopt ? [] : [...existingDataBlocks(ctx, 'aws')]
 
-  for (const vpc of nodes.filter((n) => n.type === 'VPC' && !isExisting(n))) {
+  for (const vpc of nodes.filter((n) => n.type === 'VPC' && (adopt || !isExisting(n)))) {
     blocks.push(`resource "aws_vpc" "${ctx.name(vpc)}" {
   cidr_block = "${vpc.data.cidr}"
 
@@ -84,7 +85,7 @@ export function exportAwsTerraform(nodes, edges, providerVersion) {
 }`)
   }
 
-  for (const sub of nodes.filter((n) => n.type === 'Subnet' && !isExisting(n))) {
+  for (const sub of nodes.filter((n) => n.type === 'Subnet' && (adopt || !isExisting(n)))) {
     const vpc = findVpc(sub)
     const vpcRef = vpc ? ref(vpc) + '.id' : `"" # ${tt('unassociatedVpc')}`
     blocks.push(`resource "aws_subnet" "${ctx.name(sub)}" {
@@ -98,7 +99,7 @@ export function exportAwsTerraform(nodes, edges, providerVersion) {
 }`)
   }
 
-  for (const sg of nodes.filter((n) => n.type === 'SecurityGroup' && !isExisting(n))) {
+  for (const sg of nodes.filter((n) => n.type === 'SecurityGroup' && (adopt || !isExisting(n)))) {
     const vpc = findVpc(sg)
     const vpcRef = vpc ? ref(vpc) + '.id' : `"" # ${tt('unassociatedVpc')}`
     blocks.push(`resource "aws_security_group" "${ctx.name(sg)}" {
@@ -109,6 +110,7 @@ export function exportAwsTerraform(nodes, edges, providerVersion) {
     Name = "${clean(sg.data.name)}"
   }
 }`)
+    if (isExisting(sg)) continue // 已有安全组只接管本身，不重建规则
     ;(sg.data.rules || []).forEach((rule, i) => {
       const port = parsePortRange(rule.port, rule.protocol)
       const fromPort = port ? port.from : -1
@@ -125,7 +127,7 @@ export function exportAwsTerraform(nodes, edges, providerVersion) {
     })
   }
 
-  const eips = nodes.filter((n) => n.type === 'Eip' && !isExisting(n))
+  const eips = nodes.filter((n) => n.type === 'Eip' && (adopt || !isExisting(n)))
   for (const eip of eips) {
     const eipCountLine = isCountedInstance(eip) ? `\n  count = ${eipCount(eip)}` : ''
     blocks.push(`resource "aws_eip" "${ctx.name(eip)}" {${eipCountLine}
@@ -133,6 +135,7 @@ export function exportAwsTerraform(nodes, edges, providerVersion) {
     Name = ${eipNameExpr(eip)}
   }
 }`)
+    if (isExisting(eip)) continue // 已有 EIP 只接管本身，不重建绑定
     // 按编辑器选择的绑定生成关联（每个 EIP 绑定到选定的实例内网 IP）
     const eipTargets = eipInstanceCandidates(ctx, eip)
     eipBindings(eip, eipTargets).forEach((b, i) => {
@@ -144,7 +147,7 @@ export function exportAwsTerraform(nodes, edges, providerVersion) {
     })
   }
 
-  for (const gw of nodes.filter((n) => n.type === 'Gateway' && !isExisting(n))) {
+  for (const gw of nodes.filter((n) => n.type === 'Gateway' && (adopt || !isExisting(n)))) {
     const sub = findSubnet(gw)
     const vpc = findVpc(gw)
     const vswRef = sub ? ref(sub) + '.id' : `"" # ${tt('unassociatedVswitch')}`
@@ -162,7 +165,7 @@ export function exportAwsTerraform(nodes, edges, providerVersion) {
   }
 
   // 负载均衡：ALB/NLB 实例 + 每个监听规则一个目标组/监听器 + 目标绑定
-  for (const lb of nodes.filter((n) => n.type === 'LoadBalancer' && !isExisting(n))) {
+  for (const lb of nodes.filter((n) => n.type === 'LoadBalancer' && (adopt || !isExisting(n)))) {
     const vpc = lbVpc(ctx, lb)
     const subs = lbSubnets(ctx, lb)
     const rules = lb.data.rules || []
@@ -177,6 +180,7 @@ export function exportAwsTerraform(nodes, edges, providerVersion) {
     blocks.push(`resource "aws_lb" "${ctx.name(lb)}" {
 ${hclLines(rows)}
 }`)
+    if (isExisting(lb)) continue // 已有负载均衡只接管本身，不重建目标组/监听器
     rules.forEach((rule, ri) => {
       const ruleName = `${ctx.name(lb)}_${ri}`
       const port = Number(rule.port) || 80
@@ -254,7 +258,7 @@ ${hclLines(rows)}
 ${tlsKeyBlocks(keyName, resName)}`)
   }
 
-  for (const inst of nodes.filter((n) => n.type === 'Instance' && !isExisting(n))) {
+  for (const inst of nodes.filter((n) => n.type === 'Instance' && (adopt || !isExisting(n)))) {
     const sub = findSubnet(inst)
     const vswRef = sub ? ref(sub) + '.id' : `"" # ${tt('unassociatedVswitch')}`
     const sgs = ctx.targetNodes(inst.id).filter((n) => n.type === 'SecurityGroup')
@@ -316,7 +320,7 @@ ${tlsKeyBlocks(keyName, resName)}`)
 }`)
   }
 
-  for (const rt of nodes.filter((n) => n.type === 'RouteTable' && !isExisting(n))) {
+  for (const rt of nodes.filter((n) => n.type === 'RouteTable' && (adopt || !isExisting(n)))) {
     const vpc = findVpc(rt)
     const vpcRef = vpc ? ref(vpc) + '.id' : `"" # ${tt('unassociatedVpc')}`
     blocks.push(`resource "aws_route_table" "${ctx.name(rt)}" {
@@ -326,6 +330,7 @@ ${tlsKeyBlocks(keyName, resName)}`)
     Name = "${clean(rt.data.name)}"
   }
 }`)
+    if (isExisting(rt)) continue // 已有路由表只接管本身，不重建路由条目
     ;(rt.data.routes || []).forEach((route, i) => {
       const hop = resolveNextHopNode(ctx, route, vpc)
       let hopLine
@@ -369,9 +374,10 @@ ${hopLine}
   }
 
   return {
-    provider: providerBlock(providerVersion),
+    provider: providerBlock(providerVersion, adopt),
     variables: variablesBlock(region),
     main: blocks.join('\n\n') + '\n',
     outputs: buildOutputs(ctx, nodes, 'aws'),
+    imports: adopt ? existingImportBlocks(ctx, 'aws').join('\n\n') : '',
   }
 }
