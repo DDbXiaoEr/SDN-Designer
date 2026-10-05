@@ -28,6 +28,7 @@ leaking credentials, so this service signs and normalizes the calls on the front
 | GET | `/api/providerVersions/:vendor` | Published versions for a single vendor |
 
 - `kind`: `images` / `instanceTypes` (full lists) or `gpuImages` / `gpuInstanceTypes` (GPU-only); inventory uses `/api/inventory/...`
+- The catalog registers each of the above `kind` values as an **explicit route path** (no longer a `/api/:kind` wildcard), so `/api/inventory` and `/api/providerVersions` are never captured by the catalog, and route registration order no longer matters.
 - `vendor`: `tencent` / `aliyun` / `aws` / `huawei`
 
 `gpuImages` / `gpuInstanceTypes` share the cache of the corresponding full list and are filtered

@@ -26,6 +26,7 @@ Go + Gin 实现的云厂商清单代理：按地域拉取**镜像**与**实例�
 
 - `kind`：`images` / `instanceTypes`（全量）或 `gpuImages` / `gpuInstanceTypes`（仅 GPU）；库存走独立路径 `/api/inventory/...`
 - `vendor`：`tencent` / `aliyun` / `aws` / `huawei`
+- catalog 将上述 `kind` 作为**显式路由路径**注册（不再用 `/api/:kind` 通配），因此 `/api/inventory`、`/api/providerVersions` 不会被 catalog 抢占；路由注册顺序也不再敏感。
 
 `gpuImages` / `gpuInstanceTypes` 与对应全量清单共用缓存，服务端按 `gpu` 字段过滤后返回。
 

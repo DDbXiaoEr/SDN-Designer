@@ -239,7 +239,8 @@ OVN-Designer/
   以 `images.js` / `instanceTypes.js` 的本地内置清单为基底，按 `value` 合并在线清单（同项在线覆盖）。
   在线来源通过构建时环境变量注入：`VITE_CATALOG_URL`（远程 JSON）优先，其次 `VITE_CATALOG_API_URL`
   （厂商 API 代理，支持 `{vendor}` / `{kind}` / `{region}` 占位符），配置见 `.env.example`；拉取失败时自动回退本地。
-  代理服务见 `server/`（Go + Gin）：`GET /api/:kind/:vendor[/:region]` 用厂商 AK/SK 签名调用
+  代理服务见 `server/`（Go + Gin）：`GET /api/:kind/:vendor[/:region]`（`kind` 为 `images`/`instanceTypes`/`gpuImages`/`gpuInstanceTypes`，
+  以显式路径注册，不用通配，避免抢占 `/api/inventory`、`/api/providerVersions`）用厂商 AK/SK 签名调用
   `DescribeImages` / `DescribeInstanceTypes`（腾讯云另有可用区库存 `zones`；阿里云/AWS/华为云会丢掉当前地域无货规格）；
   `kind` 还可为 `gpuImages` / `gpuInstanceTypes`，从全量清单中过滤 GPU 规格与相关镜像
   （项上带 `gpu` / `gpuSpec` / `gpuCount` / `gpuMemoryGiB`），未配置密钥的厂商返回 501；

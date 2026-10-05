@@ -239,7 +239,8 @@ Node object: `{ id, type, position: {x,y}, data: {...} }`
   based on the local built-in lists in `images.js` / `instanceTypes.js`, merged with online catalogs by `value` (online wins on duplicates).
   Online sources are injected via build-time env vars: `VITE_CATALOG_URL` (remote JSON) takes priority, then `VITE_CATALOG_API_URL`
   (vendor API proxy, supporting `{vendor}` / `{kind}` / `{region}` placeholders); see `.env.example`; on fetch failure it falls back to local automatically.
-  The proxy service is in `server/` (Go + Gin): `GET /api/:kind/:vendor[/:region]` signs with the vendor AK/SK and calls
+  The proxy service is in `server/` (Go + Gin): `GET /api/:kind/:vendor[/:region]` (`kind` is `images`/`instanceTypes`/`gpuImages`/`gpuInstanceTypes`,
+  registered as explicit paths rather than a wildcard so it never captures `/api/inventory` or `/api/providerVersions`) signs with the vendor AK/SK and calls
   `DescribeImages` / `DescribeInstanceTypes` (Tencent Cloud also returns per-zone stock `zones`; Alibaba Cloud/AWS/Huawei Cloud drop types that are out of stock in the current region);
   `kind` can also be `gpuImages` / `gpuInstanceTypes`, filtering GPU types and related images from the full catalog
   (entries carry `gpu` / `gpuSpec` / `gpuCount` / `gpuMemoryGiB`); vendors without configured keys return 501;
